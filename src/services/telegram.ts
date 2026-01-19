@@ -3,7 +3,7 @@ import { StringSession } from "telegram/sessions";
 import type { TelegramService, ConnectionState, Message } from "../types";
 
 export interface TelegramServiceOptions {
-  apiId: number;
+  apiId: number | string;
   apiHash: string;
   session?: string;
   onSessionUpdate?: (session: string) => void;
@@ -11,8 +11,9 @@ export interface TelegramServiceOptions {
 
 export function createTelegramService(options: TelegramServiceOptions): TelegramService & { client: TelegramClient } {
   const { apiId, apiHash, session = "", onSessionUpdate } = options;
+  const numericApiId = typeof apiId === "string" ? parseInt(apiId, 10) : apiId;
   const stringSession = new StringSession(session);
-  const client = new TelegramClient(stringSession, apiId, apiHash, {
+  const client = new TelegramClient(stringSession, numericApiId, apiHash, {
     connectionRetries: 5,
   });
 

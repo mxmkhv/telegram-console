@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
 
 interface ApiCredentialsProps {
-  onSubmit: (apiId: number, apiHash: string) => void;
+  onSubmit: (apiId: number | string, apiHash: string) => void;
 }
 
 type Step = "apiId" | "apiHash";
@@ -15,7 +15,7 @@ export function ApiCredentials({ onSubmit }: ApiCredentialsProps) {
 
   const handleApiIdSubmit = (value: string) => {
     const trimmed = value.trim();
-    if (trimmed && /^\d+$/.test(trimmed)) {
+    if (trimmed) {
       setStep("apiHash");
     }
   };
@@ -23,7 +23,9 @@ export function ApiCredentials({ onSubmit }: ApiCredentialsProps) {
   const handleApiHashSubmit = (value: string) => {
     const trimmed = value.trim();
     if (trimmed) {
-      onSubmit(parseInt(apiId, 10), trimmed);
+      // Try to parse as number, fall back to string
+      const parsedId = /^\d+$/.test(apiId) ? parseInt(apiId, 10) : apiId;
+      onSubmit(parsedId, trimmed);
     }
   };
 

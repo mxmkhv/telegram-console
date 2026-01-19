@@ -3,7 +3,7 @@ export type SessionMode = "persistent" | "ephemeral";
 export type AuthMethod = "qr" | "phone";
 
 export interface AppConfig {
-  apiId: number;
+  apiId: number | string;
   apiHash: string;
   sessionPersistence: SessionMode;
   logLevel: LogLevel;

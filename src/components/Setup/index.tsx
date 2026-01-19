@@ -16,7 +16,7 @@ interface SetupProps {
 export function Setup({ onComplete, preferredAuthMethod }: SetupProps) {
   const [step, setStep] = useState<SetupStep>("welcome");
   const [authMethod, setAuthMethod] = useState<AuthMethod>(preferredAuthMethod);
-  const [apiId, setApiId] = useState<number | null>(null);
+  const [apiId, setApiId] = useState<number | string | null>(null);
   const [apiHash, setApiHash] = useState<string | null>(null);
   const [phoneStep, setPhoneStep] = useState<"phone" | "code" | "2fa">("phone");
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export function Setup({ onComplete, preferredAuthMethod }: SetupProps) {
     setStep("credentials");
   }, []);
 
-  const handleCredentialsSubmit = useCallback((id: number, hash: string) => {
+  const handleCredentialsSubmit = useCallback((id: number | string, hash: string) => {
     setApiId(id);
     setApiHash(hash);
     setStep("auth");

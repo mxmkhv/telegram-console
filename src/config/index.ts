@@ -42,7 +42,9 @@ export function loadConfigWithEnvOverrides(customDir?: string): AppConfig | null
 
   return {
     ...config,
-    apiId: process.env.TG_API_ID ? parseInt(process.env.TG_API_ID, 10) : config.apiId,
+    apiId: process.env.TG_API_ID
+      ? (/^\d+$/.test(process.env.TG_API_ID) ? parseInt(process.env.TG_API_ID, 10) : process.env.TG_API_ID)
+      : config.apiId,
     apiHash: process.env.TG_API_HASH ?? config.apiHash,
     sessionPersistence: (process.env.TG_SESSION_MODE as AppConfig["sessionPersistence"]) ?? config.sessionPersistence,
     logLevel: (process.env.TG_LOG_LEVEL as AppConfig["logLevel"]) ?? config.logLevel,
