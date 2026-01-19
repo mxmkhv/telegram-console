@@ -14,10 +14,11 @@
   },
   "scripts": {
     "dev": "bun run src/index.tsx",
-    "build": "bun build src/index.tsx --outdir dist --target node",
+    "build": "bun build src/index.tsx --outdir dist --target node --minify",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts,.tsx"
+    "lint": "eslint src --ext .ts,.tsx",
+    "prepublishOnly": "bun run build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
@@ -28,6 +29,7 @@
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
     "eslint": "^9.39.2",
+    "react-devtools-core": "^7.0.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.53.1"
   },
