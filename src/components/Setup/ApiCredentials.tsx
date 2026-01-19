@@ -13,15 +13,17 @@ export function ApiCredentials({ onSubmit }: ApiCredentialsProps) {
   const [apiId, setApiId] = useState("");
   const [apiHash, setApiHash] = useState("");
 
-  const handleApiIdSubmit = () => {
-    if (apiId.trim() && !isNaN(parseInt(apiId, 10))) {
+  const handleApiIdSubmit = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed && /^\d+$/.test(trimmed)) {
       setStep("apiHash");
     }
   };
 
-  const handleApiHashSubmit = () => {
-    if (apiHash.trim()) {
-      onSubmit(parseInt(apiId, 10), apiHash.trim());
+  const handleApiHashSubmit = (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed) {
+      onSubmit(parseInt(apiId, 10), trimmed);
     }
   };
 
@@ -58,6 +60,9 @@ export function ApiCredentials({ onSubmit }: ApiCredentialsProps) {
           />
         </Box>
       )}
+
+      <Text></Text>
+      <Text dimColor>[Press Enter to continue]</Text>
     </Box>
   );
 }
