@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect, memo } from "react";
+import React, { useState, useCallback, memo } from "react";
 import { Box, Text } from "ink";
-import TextInput from "ink-text-input";
+import { UncontrolledTextInput } from "ink-text-input";
 
 interface InputBarProps {
   isFocused: boolean;
@@ -9,17 +9,14 @@ interface InputBarProps {
 }
 
 function InputBarInner({ isFocused, onSubmit, selectedChatId }: InputBarProps) {
-  const [inputText, setInputText] = useState("");
-
-  // Clear input when chat changes
-  useEffect(() => {
-    setInputText("");
-  }, [selectedChatId]);
+  // Track submit count to reset input after submission
+  const [resetKey, setResetKey] = useState(0);
 
   const handleSubmit = useCallback((value: string) => {
     if (value.trim() && selectedChatId) {
       onSubmit(value.trim());
-      setInputText("");
+      // Increment key to force UncontrolledTextInput to remount and clear
+      setResetKey((k) => k + 1);
     }
   }, [selectedChatId, onSubmit]);
 
@@ -31,9 +28,9 @@ function InputBarInner({ isFocused, onSubmit, selectedChatId }: InputBarProps) {
     >
       <Text bold color={isFocused ? "cyan" : "white"}>{">"} </Text>
       <Box flexGrow={1}>
-        <TextInput
-          value={inputText}
-          onChange={setInputText}
+        <UncontrolledTextInput
+          // Key changes on chat switch OR after submit to clear input
+          key={`${selectedChatId}-${resetKey}`}
           onSubmit={handleSubmit}
           placeholder={selectedChatId ? "Type a message..." : "Select a chat first"}
           focus={isFocused}
