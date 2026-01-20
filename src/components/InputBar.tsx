@@ -4,7 +4,7 @@ import { UncontrolledTextInput } from "ink-text-input";
 
 interface InputBarProps {
   isFocused: boolean;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string, chatId: string) => void;
   selectedChatId: string | null;
 }
 
@@ -14,7 +14,7 @@ function InputBarInner({ isFocused, onSubmit, selectedChatId }: InputBarProps) {
 
   const handleSubmit = useCallback((value: string) => {
     if (value.trim() && selectedChatId) {
-      onSubmit(value.trim());
+      onSubmit(value.trim(), selectedChatId);
       // Increment key to force UncontrolledTextInput to remount and clear
       setResetKey((k) => k + 1);
     }

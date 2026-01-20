@@ -45,14 +45,6 @@ describe("appReducer", () => {
     expect(state.messages["1"]).toContain(message);
   });
 
-  it("sets input text", () => {
-    const state = appReducer(initialState, {
-      type: "SET_INPUT_TEXT",
-      payload: "Hello world",
-    });
-    expect(state.inputText).toBe("Hello world");
-  });
-
   it("sets focused panel", () => {
     const state = appReducer(initialState, {
       type: "SET_FOCUSED_PANEL",

@@ -5,7 +5,6 @@ export interface AppState {
   chats: Chat[];
   selectedChatId: string | null;
   messages: Record<string, Message[]>;
-  inputText: string;
   focusedPanel: FocusedPanel;
 }
 
@@ -15,7 +14,6 @@ export type AppAction =
   | { type: "SELECT_CHAT"; payload: string }
   | { type: "SET_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "ADD_MESSAGE"; payload: { chatId: string; message: Message } }
-  | { type: "SET_INPUT_TEXT"; payload: string }
   | { type: "SET_FOCUSED_PANEL"; payload: AppState["focusedPanel"] }
   | { type: "UPDATE_UNREAD_COUNT"; payload: { chatId: string; count: number } };
 
@@ -24,7 +22,6 @@ export const initialState: AppState = {
   chats: [],
   selectedChatId: null,
   messages: {},
-  inputText: "",
   focusedPanel: "chatList",
 };
 
@@ -59,9 +56,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           ],
         },
       };
-
-    case "SET_INPUT_TEXT":
-      return { ...state, inputText: action.payload };
 
     case "SET_FOCUSED_PANEL":
       return { ...state, focusedPanel: action.payload };

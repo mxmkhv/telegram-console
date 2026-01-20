@@ -112,10 +112,20 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
 
     onConnectionStateChange(callback) {
       connectionCallback = callback;
+      return () => {
+        if (connectionCallback === callback) {
+          connectionCallback = null;
+        }
+      };
     },
 
     onNewMessage(callback) {
       _messageCallback = callback;
+      return () => {
+        if (_messageCallback === callback) {
+          _messageCallback = null;
+        }
+      };
     },
   };
 }

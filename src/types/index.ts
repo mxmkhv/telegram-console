@@ -37,6 +37,6 @@ export interface TelegramService {
   getChats(): Promise<Chat[]>;
   getMessages(chatId: string, limit?: number): Promise<Message[]>;
   sendMessage(chatId: string, text: string): Promise<Message>;
-  onConnectionStateChange(callback: (state: ConnectionState) => void): void;
-  onNewMessage(callback: (message: Message, chatId: string) => void): void;
+  onConnectionStateChange(callback: (state: ConnectionState) => void): () => void;
+  onNewMessage(callback: (message: Message, chatId: string) => void): () => void;
 }

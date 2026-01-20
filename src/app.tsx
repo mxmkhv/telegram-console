@@ -19,6 +19,7 @@ function MainApp({ telegramService }: MainAppProps) {
   const { state, dispatch } = useApp();
   const { exit } = useInkApp();
   const [chatIndex, setChatIndex] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
 
   // Initialize connection and load chats
   useEffect(() => {
@@ -29,13 +30,18 @@ function MainApp({ telegramService }: MainAppProps) {
     };
     init();
 
-    telegramService.onConnectionStateChange((connectionState) => {
+    const unsubConnection = telegramService.onConnectionStateChange((connectionState) => {
       dispatch({ type: "SET_CONNECTION_STATE", payload: connectionState });
     });
 
-    telegramService.onNewMessage((message, chatId) => {
+    const unsubMessages = telegramService.onNewMessage((message, chatId) => {
       dispatch({ type: "ADD_MESSAGE", payload: { chatId, message } });
     });
+
+    return () => {
+      unsubConnection();
+      unsubMessages();
+    };
   }, [telegramService, dispatch]);
 
   // Load messages when chat is selected
@@ -59,16 +65,14 @@ function MainApp({ telegramService }: MainAppProps) {
   );
 
   const handleSendMessage = useCallback(
-    async (text: string) => {
-      if (state.selectedChatId) {
-        const message = await telegramService.sendMessage(state.selectedChatId, text);
-        dispatch({
-          type: "ADD_MESSAGE",
-          payload: { chatId: state.selectedChatId, message },
-        });
-      }
+    async (text: string, chatId: string) => {
+      const message = await telegramService.sendMessage(chatId, text);
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: { chatId, message },
+      });
     },
-    [state.selectedChatId, telegramService, dispatch]
+    [telegramService, dispatch]
   );
 
   // Panel navigation and global keys (disabled when input is focused to not interfere with TextInput)
@@ -111,7 +115,11 @@ function MainApp({ telegramService }: MainAppProps) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
         }
       } else if (state.focusedPanel === "messages") {
-        if (key.leftArrow) {
+        if (key.upArrow) {
+          setMessageIndex((i) => Math.max(0, i - 1));
+        } else if (key.downArrow) {
+          setMessageIndex((i) => Math.min(currentMessages.length - 1, i + 1));
+        } else if (key.leftArrow) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         } else if (key.return) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
@@ -142,6 +150,20 @@ function MainApp({ telegramService }: MainAppProps) {
     [state.messages, state.selectedChatId]
   );
 
+  // Reset message index to last message when messages change
+  useEffect(() => {
+    if (currentMessages.length > 0) {
+      setMessageIndex(currentMessages.length - 1);
+    } else {
+      setMessageIndex(0);
+    }
+  }, [currentMessages.length]);
+
+  // Memoize focus booleans to prevent unnecessary child re-renders
+  const isChatListFocused = state.focusedPanel === "chatList";
+  const isMessagesFocused = state.focusedPanel === "messages";
+  const isInputFocused = state.focusedPanel === "input";
+
   return (
     <Box flexDirection="column" height="100%">
       <Box flexGrow={1}>
@@ -150,16 +172,17 @@ function MainApp({ telegramService }: MainAppProps) {
           selectedChatId={state.selectedChatId}
           onSelectChat={handleSelectChat}
           selectedIndex={chatIndex}
-          isFocused={state.focusedPanel === "chatList"}
+          isFocused={isChatListFocused}
         />
         <MessageView
-          isFocused={state.focusedPanel === "messages"}
+          isFocused={isMessagesFocused}
           selectedChatTitle={selectedChat?.title ?? null}
           messages={currentMessages}
+          selectedIndex={messageIndex}
         />
       </Box>
       <InputBar
-        isFocused={state.focusedPanel === "input"}
+        isFocused={isInputFocused}
         onSubmit={handleSendMessage}
         selectedChatId={state.selectedChatId}
       />
