@@ -8,20 +8,54 @@ import { StatusBar } from "./components/StatusBar";
 import { Setup } from "./components/Setup";
 import { WelcomeNew } from "./components/WelcomeNew";
 import { WelcomeBack } from "./components/WelcomeBack";
+import { HeaderBar } from "./components/HeaderBar";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { LogoutPrompt } from "./components/LogoutPrompt";
 import { hasConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, getSessionPath } from "./config";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService } from "./services/telegram.mock";
-import type { AppConfig, TelegramService } from "./types";
+import type { AppConfig, TelegramService, LogoutMode } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
+  onLogout: (mode: LogoutMode) => void;
 }
 
-function MainApp({ telegramService }: MainAppProps) {
+function MainApp({ telegramService, onLogout }: MainAppProps) {
   const { state, dispatch } = useApp();
   const { exit } = useInkApp();
   const [chatIndex, setChatIndex] = useState(0);
   const [messageIndex, setMessageIndex] = useState(0);
+
+  const handleHeaderSelectButton = useCallback(
+    (button: "settings" | "logout") => {
+      dispatch({ type: "SET_HEADER_SELECTED_BUTTON", payload: button });
+    },
+    [dispatch]
+  );
+
+  const handleHeaderActivate = useCallback(
+    (button: "settings" | "logout") => {
+      if (button === "settings") {
+        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
+      } else {
+        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
+      }
+    },
+    [dispatch]
+  );
+
+  const handleLogoutConfirm = useCallback(
+    (mode: LogoutMode) => {
+      dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: false });
+      onLogout(mode);
+    },
+    [dispatch, onLogout]
+  );
+
+  const handleLogoutCancel = useCallback(() => {
+    dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: false });
+  }, [dispatch]);
 
   // Initialize connection and load chats
   useEffect(() => {
@@ -88,19 +122,47 @@ function MainApp({ telegramService }: MainAppProps) {
 
       // Tab cycles panels
       if (key.tab) {
-        if (state.focusedPanel === "chatList") {
+        if (state.focusedPanel === "header") {
+          dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
+        } else if (state.focusedPanel === "chatList") {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
         } else if (state.focusedPanel === "messages") {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
         } else if (state.focusedPanel === "input") {
+          dispatch({ type: "SET_FOCUSED_PANEL", payload: "header" });
+        }
+        return;
+      }
+
+      // Header panel navigation
+      if (state.focusedPanel === "header") {
+        if (key.leftArrow) {
+          dispatch({ type: "SET_HEADER_SELECTED_BUTTON", payload: "settings" });
+        } else if (key.rightArrow) {
+          dispatch({ type: "SET_HEADER_SELECTED_BUTTON", payload: "logout" });
+        } else if (key.return) {
+          handleHeaderActivate(state.headerSelectedButton);
+        }
+        return;
+      }
+
+      // Escape handling
+      if (key.escape) {
+        if (state.currentView === "settings") {
+          dispatch({ type: "SET_CURRENT_VIEW", payload: "chat" });
+        } else {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         }
         return;
       }
 
-      // Escape goes to chatList
-      if (key.escape) {
-        dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
+      // Global shortcuts (when not in input)
+      if (input === "s" || input === "S") {
+        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
+        return;
+      }
+      if (input === "l" || input === "L") {
+        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
         return;
       }
 
@@ -213,6 +275,7 @@ function MainApp({ telegramService }: MainAppProps) {
   }, [state.selectedChatId, canLoadOlder, currentMessages, telegramService, dispatch]);
 
   // Memoize focus booleans to prevent unnecessary child re-renders
+  const isHeaderFocused = state.focusedPanel === "header";
   const isChatListFocused = state.focusedPanel === "chatList";
   const isMessagesFocused = state.focusedPanel === "messages";
   const isInputFocused = state.focusedPanel === "input";
@@ -220,28 +283,44 @@ function MainApp({ telegramService }: MainAppProps) {
 
   return (
     <Box flexDirection="column" height="100%">
-      <Box flexGrow={1}>
-        <ChatList
-          chats={state.chats}
-          selectedChatId={state.selectedChatId}
-          onSelectChat={handleSelectChat}
-          selectedIndex={chatIndex}
-          isFocused={isChatListFocused}
-        />
-        <MessageView
-          isFocused={isMessagesFocused}
-          selectedChatTitle={selectedChat?.title ?? null}
-          messages={currentMessages}
-          selectedIndex={messageIndex}
-          isLoadingOlder={isLoadingOlder}
-          canLoadOlder={canLoadOlder}
-        />
-      </Box>
-      <InputBar
-        isFocused={isInputFocused}
-        onSubmit={handleSendMessage}
-        selectedChatId={state.selectedChatId}
+      <HeaderBar
+        isFocused={isHeaderFocused}
+        selectedButton={state.headerSelectedButton}
+        onSelectButton={handleHeaderSelectButton}
+        onActivate={handleHeaderActivate}
       />
+      {state.showLogoutPrompt ? (
+        <Box flexGrow={1} alignItems="center" justifyContent="center">
+          <LogoutPrompt onConfirm={handleLogoutConfirm} onCancel={handleLogoutCancel} />
+        </Box>
+      ) : state.currentView === "settings" ? (
+        <SettingsPanel />
+      ) : (
+        <>
+          <Box flexGrow={1}>
+            <ChatList
+              chats={state.chats}
+              selectedChatId={state.selectedChatId}
+              onSelectChat={handleSelectChat}
+              selectedIndex={chatIndex}
+              isFocused={isChatListFocused}
+            />
+            <MessageView
+              isFocused={isMessagesFocused}
+              selectedChatTitle={selectedChat?.title ?? null}
+              messages={currentMessages}
+              selectedIndex={messageIndex}
+              isLoadingOlder={isLoadingOlder}
+              canLoadOlder={canLoadOlder}
+            />
+          </Box>
+          <InputBar
+            isFocused={isInputFocused}
+            onSubmit={handleSendMessage}
+            selectedChatId={state.selectedChatId}
+          />
+        </>
+      )}
       <StatusBar
         connectionState={state.connectionState}
         focusedPanel={state.focusedPanel}
@@ -351,6 +430,31 @@ export function App({ useMock = false }: AppProps) {
     setShowWelcome(false);
   }, []);
 
+  const handleLogout = useCallback((mode: LogoutMode) => {
+    if (telegramService) {
+      telegramService.disconnect();
+    }
+    if (mode === "session") {
+      deleteSession();
+      // Return to QR auth - keep config, clear setup state
+      setTelegramService(null);
+      setShowWelcome(false);
+      setUserName("");
+      setIsReturningUser(false);
+      // Re-trigger setup but skip to auth step
+      setIsSetupComplete(false);
+    } else {
+      deleteAllData();
+      // Full reset - clear everything
+      setConfig(null);
+      setTelegramService(null);
+      setShowWelcome(false);
+      setUserName("");
+      setIsReturningUser(false);
+      setIsSetupComplete(false);
+    }
+  }, [telegramService]);
+
   if (!isSetupComplete) {
     return (
       <Setup
@@ -374,7 +478,7 @@ export function App({ useMock = false }: AppProps) {
 
   return (
     <AppProvider telegramService={telegramService}>
-      <MainApp telegramService={telegramService} />
+      <MainApp telegramService={telegramService} onLogout={handleLogout} />
     </AppProvider>
   );
 }
