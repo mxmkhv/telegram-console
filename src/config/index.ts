@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { AppConfig } from "../types";
@@ -50,4 +50,27 @@ export function loadConfigWithEnvOverrides(customDir?: string): AppConfig | null
     logLevel: (process.env.TG_LOG_LEVEL as AppConfig["logLevel"]) ?? config.logLevel,
     authMethod: (process.env.TG_AUTH_METHOD as AppConfig["authMethod"]) ?? config.authMethod,
   };
+}
+
+export function getSessionPath(customDir?: string): string {
+  return join(getConfigDir(customDir), "session");
+}
+
+export function deleteSession(customDir?: string): void {
+  const path = getSessionPath(customDir);
+  if (existsSync(path)) {
+    unlinkSync(path);
+  }
+}
+
+export function deleteConfig(customDir?: string): void {
+  const path = getConfigPath(customDir);
+  if (existsSync(path)) {
+    unlinkSync(path);
+  }
+}
+
+export function deleteAllData(customDir?: string): void {
+  deleteSession(customDir);
+  deleteConfig(customDir);
 }
