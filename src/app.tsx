@@ -6,7 +6,9 @@ import { MessageView } from "./components/MessageView";
 import { InputBar } from "./components/InputBar";
 import { StatusBar } from "./components/StatusBar";
 import { Setup } from "./components/Setup";
-import { hasConfig, loadConfigWithEnvOverrides, saveConfig } from "./config";
+import { WelcomeNew } from "./components/WelcomeNew";
+import { WelcomeBack } from "./components/WelcomeBack";
+import { hasConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, getSessionPath } from "./config";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService } from "./services/telegram.mock";
 import type { AppConfig, TelegramService } from "./types";
@@ -256,13 +258,19 @@ export function App({ useMock = false }: AppProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [telegramService, setTelegramService] = useState<TelegramService | null>(null);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [isReturningUser, setIsReturningUser] = useState(false);
+  const [userName, setUserName] = useState("");
 
   useEffect(() => {
     if (hasConfig()) {
       const loadedConfig = loadConfigWithEnvOverrides();
-      // Validate config has valid credentials before skipping setup
       if (loadedConfig && loadedConfig.apiId && loadedConfig.apiHash) {
         setConfig(loadedConfig);
+        // Check if session exists (returning user)
+        const { existsSync } = require("fs");
+        const sessionExists = existsSync(getSessionPath());
+        setIsReturningUser(sessionExists);
         setIsSetupComplete(true);
       }
     }
@@ -309,6 +317,22 @@ export function App({ useMock = false }: AppProps) {
     }
   }, [isSetupComplete, config, useMock]);
 
+  // Fetch user name and show welcome after service is ready
+  useEffect(() => {
+    if (telegramService && !showWelcome && userName === "") {
+      telegramService.connect().then(async () => {
+        try {
+          // Get user info - we need to access the underlying client
+          // For now, use a placeholder; this will be enhanced
+          setUserName("User");
+          setShowWelcome(true);
+        } catch {
+          setShowWelcome(true);
+        }
+      });
+    }
+  }, [telegramService, showWelcome, userName]);
+
   const handleSetupComplete = useCallback((newConfig: AppConfig, session: string) => {
     saveConfig(newConfig);
     // Save session string to config directory
@@ -323,6 +347,10 @@ export function App({ useMock = false }: AppProps) {
     setIsSetupComplete(true);
   }, []);
 
+  const handleWelcomeDismiss = useCallback(() => {
+    setShowWelcome(false);
+  }, []);
+
   if (!isSetupComplete) {
     return (
       <Setup
@@ -334,6 +362,14 @@ export function App({ useMock = false }: AppProps) {
 
   if (!telegramService) {
     return null;
+  }
+
+  if (showWelcome) {
+    return isReturningUser ? (
+      <WelcomeBack userName={userName} onContinue={handleWelcomeDismiss} />
+    ) : (
+      <WelcomeNew userName={userName} onContinue={handleWelcomeDismiss} />
+    );
   }
 
   return (
