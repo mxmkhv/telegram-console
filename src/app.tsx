@@ -122,7 +122,12 @@ function MainApp({ telegramService }: MainAppProps) {
         } else if (key.leftArrow) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         } else if (key.return) {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
+          // If at top and can load older, load them; otherwise go to input
+          if (canLoadOlder) {
+            loadOlderMessages();
+          } else {
+            dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
+          }
         }
       }
     },
@@ -150,19 +155,66 @@ function MainApp({ telegramService }: MainAppProps) {
     [state.messages, state.selectedChatId]
   );
 
-  // Reset message index to last message when messages change
+  // Reset message index to last message when chat changes, messages first load, or new message added
+  const prevChatIdRef = React.useRef<string | null>(null);
+  const prevMessageCountRef = React.useRef<number>(0);
   useEffect(() => {
-    if (currentMessages.length > 0) {
-      setMessageIndex(currentMessages.length - 1);
-    } else {
-      setMessageIndex(0);
+    const chatChanged = state.selectedChatId !== prevChatIdRef.current;
+    const messagesFirstLoaded = prevMessageCountRef.current === 0 && currentMessages.length > 0;
+    // New message added (count increased by 1, not a prepend of many)
+    const newMessageAdded = currentMessages.length === prevMessageCountRef.current + 1;
+
+    if (chatChanged || messagesFirstLoaded || newMessageAdded) {
+      prevChatIdRef.current = state.selectedChatId;
+      if (currentMessages.length > 0) {
+        setMessageIndex(currentMessages.length - 1);
+      } else {
+        setMessageIndex(0);
+      }
     }
-  }, [currentMessages.length]);
+    prevMessageCountRef.current = currentMessages.length;
+  }, [state.selectedChatId, currentMessages.length]);
+
+  // Check if we can load older messages (near top of messages)
+  const canLoadOlder = useMemo(() => {
+    const chatId = state.selectedChatId;
+    if (!chatId || currentMessages.length === 0) return false;
+    return (
+      messageIndex === 0 &&
+      state.hasMoreMessages[chatId] !== false &&
+      !state.loadingOlderMessages[chatId]
+    );
+  }, [messageIndex, state.selectedChatId, currentMessages.length, state.hasMoreMessages, state.loadingOlderMessages]);
+
+  // Function to load older messages (called manually)
+  const loadOlderMessages = useCallback(() => {
+    const chatId = state.selectedChatId;
+    if (!chatId || !canLoadOlder) return;
+
+    const oldestMessage = currentMessages[0];
+    if (!oldestMessage) return;
+
+    dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: true } });
+
+    telegramService.getMessages(chatId, 50, oldestMessage.id).then((olderMessages) => {
+      if (olderMessages.length > 0) {
+        dispatch({ type: "PREPEND_MESSAGES", payload: { chatId, messages: olderMessages } });
+        // Adjust messageIndex to maintain position
+        setMessageIndex((prev) => prev + olderMessages.length);
+      }
+      dispatch({
+        type: "SET_HAS_MORE_MESSAGES",
+        payload: { chatId, hasMore: olderMessages.length === 50 },
+      });
+      dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
+    });
+  }, [state.selectedChatId, canLoadOlder, currentMessages, telegramService, dispatch]);
 
   // Memoize focus booleans to prevent unnecessary child re-renders
   const isChatListFocused = state.focusedPanel === "chatList";
   const isMessagesFocused = state.focusedPanel === "messages";
   const isInputFocused = state.focusedPanel === "input";
+  const isLoadingOlder = state.selectedChatId ? state.loadingOlderMessages[state.selectedChatId] ?? false : false;
 
   return (
     <Box flexDirection="column" height="100%">
@@ -179,6 +231,8 @@ function MainApp({ telegramService }: MainAppProps) {
           selectedChatTitle={selectedChat?.title ?? null}
           messages={currentMessages}
           selectedIndex={messageIndex}
+          isLoadingOlder={isLoadingOlder}
+          canLoadOlder={canLoadOlder}
         />
       </Box>
       <InputBar

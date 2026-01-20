@@ -6,6 +6,8 @@ export interface AppState {
   selectedChatId: string | null;
   messages: Record<string, Message[]>;
   focusedPanel: FocusedPanel;
+  loadingOlderMessages: Record<string, boolean>;
+  hasMoreMessages: Record<string, boolean>;
 }
 
 export type AppAction =
@@ -14,8 +16,11 @@ export type AppAction =
   | { type: "SELECT_CHAT"; payload: string }
   | { type: "SET_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "ADD_MESSAGE"; payload: { chatId: string; message: Message } }
+  | { type: "PREPEND_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "SET_FOCUSED_PANEL"; payload: AppState["focusedPanel"] }
-  | { type: "UPDATE_UNREAD_COUNT"; payload: { chatId: string; count: number } };
+  | { type: "UPDATE_UNREAD_COUNT"; payload: { chatId: string; count: number } }
+  | { type: "SET_LOADING_OLDER_MESSAGES"; payload: { chatId: string; loading: boolean } }
+  | { type: "SET_HAS_MORE_MESSAGES"; payload: { chatId: string; hasMore: boolean } };
 
 export const initialState: AppState = {
   connectionState: "disconnected",
@@ -23,6 +28,8 @@ export const initialState: AppState = {
   selectedChatId: null,
   messages: {},
   focusedPanel: "chatList",
+  loadingOlderMessages: {},
+  hasMoreMessages: {},
 };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -54,6 +61,36 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             ...(state.messages[action.payload.chatId] ?? []),
             action.payload.message,
           ],
+        },
+      };
+
+    case "PREPEND_MESSAGES":
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.payload.chatId]: [
+            ...action.payload.messages,
+            ...(state.messages[action.payload.chatId] ?? []),
+          ],
+        },
+      };
+
+    case "SET_LOADING_OLDER_MESSAGES":
+      return {
+        ...state,
+        loadingOlderMessages: {
+          ...state.loadingOlderMessages,
+          [action.payload.chatId]: action.payload.loading,
+        },
+      };
+
+    case "SET_HAS_MORE_MESSAGES":
+      return {
+        ...state,
+        hasMoreMessages: {
+          ...state.hasMoreMessages,
+          [action.payload.chatId]: action.payload.hasMore,
         },
       };
 

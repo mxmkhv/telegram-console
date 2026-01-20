@@ -79,8 +79,8 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         }));
     },
 
-    async getMessages(chatId: string, limit = 50) {
-      const messages = await client.getMessages(chatId, { limit });
+    async getMessages(chatId: string, limit = 50, offsetId?: number) {
+      const messages = await client.getMessages(chatId, { limit, offsetId });
       // Reverse to get chronological order (oldest first)
       return messages.map((m) => {
         const sender = m.sender as { firstName?: string; lastName?: string; title?: string; username?: string } | undefined;

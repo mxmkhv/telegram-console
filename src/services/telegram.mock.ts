@@ -7,12 +7,28 @@ const MOCK_CHATS: Chat[] = [
   { id: "4", title: "Family", unreadCount: 0, isGroup: true },
 ];
 
+// Generate a large conversation for testing infinite scroll
+function generateMockMessages(chatId: string, senderName: string, count: number): Message[] {
+  const messages: Message[] = [];
+  const baseDate = new Date("2026-01-01T10:00:00");
+
+  for (let i = 1; i <= count; i++) {
+    const isOutgoing = i % 3 === 0;
+    messages.push({
+      id: i,
+      senderId: isOutgoing ? "me" : chatId,
+      senderName: isOutgoing ? "You" : senderName,
+      text: `Message ${i} in chat ${chatId}`,
+      timestamp: new Date(baseDate.getTime() + i * 60000), // 1 minute apart
+      isOutgoing,
+    });
+  }
+
+  return messages;
+}
+
 const MOCK_MESSAGES: Record<string, Message[]> = {
-  "1": [
-    { id: 1, senderId: "1", senderName: "John", text: "Hey, how are you?", timestamp: new Date("2026-01-19T10:30:00"), isOutgoing: false },
-    { id: 2, senderId: "me", senderName: "You", text: "I'm good, thanks!", timestamp: new Date("2026-01-19T10:31:00"), isOutgoing: true },
-    { id: 3, senderId: "1", senderName: "John", text: "Great to hear", timestamp: new Date("2026-01-19T10:32:00"), isOutgoing: false },
-  ],
+  "1": generateMockMessages("1", "John", 150),  // 150 messages for testing infinite scroll
   "2": [
     { id: 1, senderId: "2", senderName: "Jane", text: "Meeting at 3pm?", timestamp: new Date("2026-01-19T09:00:00"), isOutgoing: false },
   ],
@@ -52,8 +68,20 @@ export function createMockTelegramService(): TelegramService {
       return [...MOCK_CHATS];
     },
 
-    async getMessages(chatId: string, limit = 50) {
-      return (messages[chatId] ?? []).slice(-limit);
+    async getMessages(chatId: string, limit = 50, offsetId?: number) {
+      const chatMessages = messages[chatId] ?? [];
+      if (offsetId !== undefined) {
+        // Return messages older than offsetId (simulating GramJS behavior)
+        const offsetIndex = chatMessages.findIndex((m) => m.id === offsetId);
+        if (offsetIndex <= 0) {
+          return [];
+        }
+        // Get messages before the offset, take up to limit, maintaining chronological order
+        const olderMessages = chatMessages.slice(0, offsetIndex);
+        return olderMessages.slice(-limit);
+      }
+      // No offset: return most recent messages
+      return chatMessages.slice(-limit);
     },
 
     async sendMessage(chatId: string, text: string) {
