@@ -226,7 +226,7 @@
         "If no media: existing behavior (if any)",
         "Typecheck passes"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "File: src/components/MessageView.tsx"
     },
     {

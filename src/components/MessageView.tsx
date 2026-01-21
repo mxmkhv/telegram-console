@@ -1,9 +1,9 @@
 import { memo, useMemo, useCallback } from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useInput } from "ink";
 import type { Message } from "../types";
 import { MediaPlaceholder } from './MediaPlaceholder.js';
 import { MediaPreview } from './MediaPreview.js';
-import { useTelegramService } from '../state/context.js';
+import { useTelegramService, useAppDispatch } from '../state/context.js';
 
 const VISIBLE_LINES = 15;
 
@@ -37,11 +37,22 @@ function getMessageLineCount(msg: Message, isSelected: boolean): number {
 
 function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false }: MessageViewProps) {
   const telegramService = useTelegramService();
+  const dispatch = useAppDispatch();
 
   const downloadMedia = useCallback((message: Message) => {
     if (!telegramService) return Promise.resolve(undefined);
     return telegramService.downloadMedia(message);
   }, [telegramService]);
+
+  // Handle Enter key to open media panel
+  useInput((_input, key) => {
+    if (key.return) {
+      const selectedMessage = chatMessages[selectedIndex];
+      if (selectedMessage?.media) {
+        dispatch({ type: 'OPEN_MEDIA_PANEL', payload: { messageId: selectedMessage.id } });
+      }
+    }
+  }, { isActive: isFocused });
 
   // Calculate line count for each message
   const messageLineCounts = useMemo(() => {
