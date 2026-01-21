@@ -195,7 +195,7 @@
         "Typecheck passes",
         "Verify visually: selecting media message shows inline preview below placeholder"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "File: src/components/MessageView.tsx"
     },
     {

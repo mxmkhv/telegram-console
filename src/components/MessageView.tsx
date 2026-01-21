@@ -1,7 +1,9 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useCallback } from "react";
 import { Box, Text } from "ink";
 import type { Message } from "../types";
 import { MediaPlaceholder } from './MediaPlaceholder.js';
+import { MediaPreview } from './MediaPreview.js';
+import { useTelegramService } from '../state/context.js';
 
 const VISIBLE_LINES = 15;
 
@@ -22,19 +24,32 @@ function formatTime(date: Date): string {
   });
 }
 
-function getMessageLineCount(msg: Message): number {
+function getMessageLineCount(msg: Message, isSelected: boolean): number {
   let lines = msg.text.split("\n").length;
   if (msg.media) {
     lines += 1; // Add 1 line for MediaPlaceholder
+    if (isSelected && !msg.media.isAnimated) {
+      lines += 6; // inline preview height
+    }
   }
   return lines;
 }
 
 function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false }: MessageViewProps) {
+  const telegramService = useTelegramService();
+
+  const downloadMedia = useCallback((message: Message) => {
+    if (!telegramService) return Promise.resolve(undefined);
+    return telegramService.downloadMedia(message);
+  }, [telegramService]);
+
   // Calculate line count for each message
   const messageLineCounts = useMemo(() => {
-    return chatMessages.map(getMessageLineCount);
-  }, [chatMessages]);
+    return chatMessages.map((msg, index) => {
+      const isSelected = index === selectedIndex && isFocused;
+      return getMessageLineCount(msg, isSelected);
+    });
+  }, [chatMessages, selectedIndex, isFocused]);
 
   const totalLines = useMemo(() => {
     return messageLineCounts.reduce((sum, count) => sum + count, 0);
@@ -153,6 +168,9 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
               ))}
               {msg.media && (
                 <MediaPlaceholder media={msg.media} messageId={msg.id} />
+              )}
+              {isSelected && msg.media && !msg.media.isAnimated && (
+                <MediaPreview message={msg} downloadMedia={downloadMedia} />
               )}
             </Box>
           );
