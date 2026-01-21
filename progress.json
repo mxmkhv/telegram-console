@@ -257,8 +257,8 @@
         "Typecheck passes",
         "Verify visually: pressing Escape closes panel and returns to message list"
       ],
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "MediaPanel.tsx has useInput handler for Enter/Escape that calls onClose(), and app.tsx handleCloseMediaPanel dispatches CLOSE_MEDIA_PANEL and sets focus back to messages panel"
     },
     {
       "id": "US-018",
