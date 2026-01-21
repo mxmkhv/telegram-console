@@ -1,5 +1,19 @@
 import type { Chat, Message, ConnectionState, FocusedPanel, CurrentView } from "../types";
 
+export interface InlinePreviewState {
+  loading: boolean;
+  imageData: string | null;
+  error: string | null;
+}
+
+export interface MediaPanelState {
+  isOpen: boolean;
+  messageId: number | null;
+  loading: boolean;
+  imageData: string | null;
+  error: string | null;
+}
+
 export interface AppState {
   connectionState: ConnectionState;
   chats: Chat[];
@@ -11,6 +25,8 @@ export interface AppState {
   currentView: CurrentView;
   showLogoutPrompt: boolean;
   headerSelectedButton: "settings" | "logout";
+  mediaPanel: MediaPanelState;
+  inlinePreviews: Map<number, InlinePreviewState>;
 }
 
 export type AppAction =
@@ -27,7 +43,17 @@ export type AppAction =
   | { type: "SET_CURRENT_VIEW"; payload: CurrentView }
   | { type: "SET_SHOW_LOGOUT_PROMPT"; payload: boolean }
   | { type: "SET_HEADER_SELECTED_BUTTON"; payload: "settings" | "logout" }
-  | { type: "RESET_STATE" };
+  | { type: "RESET_STATE" }
+  // Media panel actions
+  | { type: "OPEN_MEDIA_PANEL"; payload: { messageId: number } }
+  | { type: "CLOSE_MEDIA_PANEL" }
+  | { type: "SET_MEDIA_LOADING"; payload: boolean }
+  | { type: "SET_MEDIA_DATA"; payload: string }
+  | { type: "SET_MEDIA_ERROR"; payload: string }
+  // Inline preview actions
+  | { type: "SET_INLINE_PREVIEW_LOADING"; payload: { messageId: number } }
+  | { type: "SET_INLINE_PREVIEW_DATA"; payload: { messageId: number; imageData: string } }
+  | { type: "SET_INLINE_PREVIEW_ERROR"; payload: { messageId: number; error: string } };
 
 export const initialState: AppState = {
   connectionState: "disconnected",
@@ -40,6 +66,14 @@ export const initialState: AppState = {
   currentView: "chat",
   showLogoutPrompt: false,
   headerSelectedButton: "settings",
+  mediaPanel: {
+    isOpen: false,
+    messageId: null,
+    loading: false,
+    imageData: null,
+    error: null,
+  },
+  inlinePreviews: new Map(),
 };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -127,7 +161,95 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, headerSelectedButton: action.payload };
 
     case "RESET_STATE":
-      return { ...initialState };
+      return { ...initialState, inlinePreviews: new Map() };
+
+    // Media panel actions
+    case "OPEN_MEDIA_PANEL":
+      return {
+        ...state,
+        mediaPanel: {
+          isOpen: true,
+          messageId: action.payload.messageId,
+          loading: false,
+          imageData: null,
+          error: null,
+        },
+      };
+
+    case "CLOSE_MEDIA_PANEL":
+      return {
+        ...state,
+        mediaPanel: {
+          isOpen: false,
+          messageId: null,
+          loading: false,
+          imageData: null,
+          error: null,
+        },
+      };
+
+    case "SET_MEDIA_LOADING":
+      return {
+        ...state,
+        mediaPanel: {
+          ...state.mediaPanel,
+          loading: action.payload,
+          error: null,
+        },
+      };
+
+    case "SET_MEDIA_DATA":
+      return {
+        ...state,
+        mediaPanel: {
+          ...state.mediaPanel,
+          loading: false,
+          imageData: action.payload,
+          error: null,
+        },
+      };
+
+    case "SET_MEDIA_ERROR":
+      return {
+        ...state,
+        mediaPanel: {
+          ...state.mediaPanel,
+          loading: false,
+          imageData: null,
+          error: action.payload,
+        },
+      };
+
+    // Inline preview actions
+    case "SET_INLINE_PREVIEW_LOADING": {
+      const newPreviews = new Map(state.inlinePreviews);
+      newPreviews.set(action.payload.messageId, {
+        loading: true,
+        imageData: null,
+        error: null,
+      });
+      return { ...state, inlinePreviews: newPreviews };
+    }
+
+    case "SET_INLINE_PREVIEW_DATA": {
+      const newPreviews = new Map(state.inlinePreviews);
+      newPreviews.set(action.payload.messageId, {
+        loading: false,
+        imageData: action.payload.imageData,
+        error: null,
+      });
+      return { ...state, inlinePreviews: newPreviews };
+    }
+
+    case "SET_INLINE_PREVIEW_ERROR": {
+      const newPreviews = new Map(state.inlinePreviews);
+      newPreviews.set(action.payload.messageId, {
+        loading: false,
+        imageData: null,
+        error: action.payload.error,
+      });
+      return { ...state, inlinePreviews: newPreviews };
+    }
 
     default:
       return state;

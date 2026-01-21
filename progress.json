@@ -120,7 +120,7 @@
         "Add SET_INLINE_PREVIEW_ERROR action",
         "Typecheck passes"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "File: src/state/reducer.ts"
     },
     {
