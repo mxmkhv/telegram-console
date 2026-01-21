@@ -38,6 +38,7 @@
     "conf": "^15.0.2",
     "ink": "^6.6.0",
     "ink-text-input": "^6.0.0",
+    "lru-cache": "^11.2.4",
     "qrcode-terminal": "^0.12.0",
     "react": "^19.2.3",
     "telegram": "^2.26.22"
