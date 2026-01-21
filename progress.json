@@ -134,7 +134,7 @@
         "Memoized with React.memo()",
         "Typecheck passes"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "Icons: 📷 photo, 😀 sticker, 🎬 gif, 🎥 video, 📄 document, 🎭 animated"
     },
     {
