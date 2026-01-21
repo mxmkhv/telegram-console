@@ -1,6 +1,34 @@
 import terminalImage from 'terminal-image';
 import type { MediaAttachment } from '../types/index.js';
 
+/**
+ * Wrapper that forces ANSI block rendering instead of iTerm2/Kitty inline images.
+ * The iTerm2 protocol uses OSC escape sequences that don't render through Ink's <Text>.
+ * We temporarily unset TERM_PROGRAM during render to trigger the fallback.
+ */
+async function renderWithAnsiBlocks(
+  buffer: Buffer,
+  options: { width?: number | string; height?: number | string; preserveAspectRatio?: boolean }
+): Promise<string> {
+  const originalTermProgram = process.env.TERM_PROGRAM;
+  const originalLcTerminal = process.env.LC_TERMINAL;
+  const originalKonsole = process.env.KONSOLE_VERSION;
+
+  // Temporarily disable terminal graphics detection
+  delete process.env.TERM_PROGRAM;
+  delete process.env.LC_TERMINAL;
+  delete process.env.KONSOLE_VERSION;
+
+  try {
+    return await terminalImage.buffer(buffer, options);
+  } finally {
+    // Restore environment
+    if (originalTermProgram) process.env.TERM_PROGRAM = originalTermProgram;
+    if (originalLcTerminal) process.env.LC_TERMINAL = originalLcTerminal;
+    if (originalKonsole) process.env.KONSOLE_VERSION = originalKonsole;
+  }
+}
+
 interface RenderOptions {
   width?: number | string;
   height?: number | string;
@@ -11,7 +39,7 @@ export async function renderImageBuffer(
   buffer: Buffer,
   options: RenderOptions = {}
 ): Promise<string> {
-  return terminalImage.buffer(buffer, {
+  return renderWithAnsiBlocks(buffer, {
     width: options.width ?? '90%',
     height: options.height,
     preserveAspectRatio: options.preserveAspectRatio ?? true,
@@ -19,7 +47,7 @@ export async function renderImageBuffer(
 }
 
 export async function renderInlinePreview(buffer: Buffer): Promise<string> {
-  return terminalImage.buffer(buffer, {
+  return renderWithAnsiBlocks(buffer, {
     height: 5,
     preserveAspectRatio: true,
   });
@@ -29,7 +57,7 @@ export async function renderPanelImage(
   buffer: Buffer,
   panelWidth: number
 ): Promise<string> {
-  return terminalImage.buffer(buffer, {
+  return renderWithAnsiBlocks(buffer, {
     width: Math.floor(panelWidth * 0.9),
     preserveAspectRatio: true,
   });

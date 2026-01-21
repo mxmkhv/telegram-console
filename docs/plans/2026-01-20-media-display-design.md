@@ -646,6 +646,36 @@ const MediaPreview = memo(function MediaPreview({
 2. **Request deduplication**: `pendingDownloads` Map prevents duplicate concurrent downloads when rapidly navigating messages.
 3. **Buffer reuse**: Panel view reuses buffer from inline preview - only re-renders at different size.
 
+## Implementation Clarifications (from interview)
+
+| Question | Decision |
+|----------|----------|
+| Service structure | Factory function `createTelegramService` returns object with methods. Add `downloadMedia` to returned object. |
+| Service access | Currently in state. Create `TelegramContext` for cleaner access in components. |
+| Keyboard handling | `useInput` per component. MediaPanel uses own useInput for Enter/Escape. |
+| Rapid navigation | **Debounce 200ms** before starting download, cancel pending on selection change. |
+| Inline preview scope | **All non-animated**: photos, static stickers, GIF thumbnails. |
+| Panel pattern | MediaPanel is first side panel - establishes the pattern. |
+
+### Debounce Implementation for MediaPreview
+
+```typescript
+useEffect(() => {
+  if (cachedPreview) return;
+
+  let cancelled = false;
+  const timeoutId = setTimeout(async () => {
+    if (cancelled) return;
+    // ... download logic
+  }, 200); // 200ms debounce
+
+  return () => {
+    cancelled = true;
+    clearTimeout(timeoutId); // Cancel pending debounced download
+  };
+}, [messageId]);
+```
+
 ## Out of Scope
 
 - Disk caching
