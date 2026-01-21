@@ -181,7 +181,7 @@
         "Typecheck passes",
         "Verify visually: messages with media show [📷 Photo: ...] placeholder"
       ],
-      "passes": false,
+      "passes": true,
       "notes": "File: src/components/MessageView.tsx"
     },
     {

@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Box, Text } from "ink";
 import type { Message } from "../types";
+import { MediaPlaceholder } from './MediaPlaceholder.js';
 
 const VISIBLE_LINES = 15;
 
@@ -22,7 +23,11 @@ function formatTime(date: Date): string {
 }
 
 function getMessageLineCount(msg: Message): number {
-  return msg.text.split("\n").length;
+  let lines = msg.text.split("\n").length;
+  if (msg.media) {
+    lines += 1; // Add 1 line for MediaPlaceholder
+  }
+  return lines;
 }
 
 function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false }: MessageViewProps) {
@@ -146,6 +151,9 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
                   </Text>
                 </Box>
               ))}
+              {msg.media && (
+                <MediaPlaceholder media={msg.media} messageId={msg.id} />
+              )}
             </Box>
           );
         })}
