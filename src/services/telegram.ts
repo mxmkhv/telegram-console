@@ -151,7 +151,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           : sender?.title ?? sender?.username ?? "Unknown";
         return {
           id: m.id,
-          senderId: m.fromId?.toString() ?? "",
+          senderId: m.senderId?.toString() ?? "",
           senderName,
           text: m.message ?? "",
           timestamp: new Date(m.date * 1000),
