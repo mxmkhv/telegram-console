@@ -117,4 +117,105 @@ describe("appReducer", () => {
     });
     expect(state2.hasMoreMessages["1"]).toBe(false);
   });
+
+  describe("reaction actions", () => {
+    it("adds a reaction to a message optimistically", () => {
+      const message = {
+        id: 1,
+        senderId: "1",
+        senderName: "Test",
+        text: "Hello",
+        timestamp: new Date(),
+        isOutgoing: false,
+        reactions: [{ emoji: "👍", count: 1, hasUserReacted: false }],
+      };
+      const stateWithMessages = appReducer(initialState, {
+        type: "SET_MESSAGES",
+        payload: { chatId: "1", messages: [message] },
+      });
+
+      const state = appReducer(stateWithMessages, {
+        type: "ADD_REACTION",
+        payload: { chatId: "1", messageId: 1, emoji: "❤️" },
+      });
+
+      const updatedMsg = state.messages["1"]?.[0];
+      expect(updatedMsg?.reactions).toHaveLength(2);
+      expect(updatedMsg?.reactions?.[1]).toEqual({ emoji: "❤️", count: 1, hasUserReacted: true });
+    });
+
+    it("increments existing reaction count when adding same emoji", () => {
+      const message = {
+        id: 1,
+        senderId: "1",
+        senderName: "Test",
+        text: "Hello",
+        timestamp: new Date(),
+        isOutgoing: false,
+        reactions: [{ emoji: "👍", count: 2, hasUserReacted: false }],
+      };
+      const stateWithMessages = appReducer(initialState, {
+        type: "SET_MESSAGES",
+        payload: { chatId: "1", messages: [message] },
+      });
+
+      const state = appReducer(stateWithMessages, {
+        type: "ADD_REACTION",
+        payload: { chatId: "1", messageId: 1, emoji: "👍" },
+      });
+
+      const updatedMsg = state.messages["1"]?.[0];
+      expect(updatedMsg?.reactions).toHaveLength(1);
+      expect(updatedMsg?.reactions?.[0]).toEqual({ emoji: "👍", count: 3, hasUserReacted: true });
+    });
+
+    it("removes user reaction from a message", () => {
+      const message = {
+        id: 1,
+        senderId: "1",
+        senderName: "Test",
+        text: "Hello",
+        timestamp: new Date(),
+        isOutgoing: false,
+        reactions: [{ emoji: "👍", count: 2, hasUserReacted: true }],
+      };
+      const stateWithMessages = appReducer(initialState, {
+        type: "SET_MESSAGES",
+        payload: { chatId: "1", messages: [message] },
+      });
+
+      const state = appReducer(stateWithMessages, {
+        type: "REMOVE_REACTION",
+        payload: { chatId: "1", messageId: 1 },
+      });
+
+      const updatedMsg = state.messages["1"]?.[0];
+      expect(updatedMsg?.reactions).toHaveLength(1);
+      expect(updatedMsg?.reactions?.[0]).toEqual({ emoji: "👍", count: 1, hasUserReacted: false });
+    });
+
+    it("removes reaction entirely when count reaches zero", () => {
+      const message = {
+        id: 1,
+        senderId: "1",
+        senderName: "Test",
+        text: "Hello",
+        timestamp: new Date(),
+        isOutgoing: false,
+        reactions: [{ emoji: "👍", count: 1, hasUserReacted: true }],
+      };
+      const stateWithMessages = appReducer(initialState, {
+        type: "SET_MESSAGES",
+        payload: { chatId: "1", messages: [message] },
+      });
+
+      const state = appReducer(stateWithMessages, {
+        type: "REMOVE_REACTION",
+        payload: { chatId: "1", messageId: 1 },
+      });
+
+      const updatedMsg = state.messages["1"]?.[0];
+      expect(updatedMsg?.reactions).toHaveLength(0);
+    });
+  });
 });

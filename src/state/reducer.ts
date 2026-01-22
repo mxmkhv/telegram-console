@@ -55,7 +55,10 @@ export type AppAction =
   | { type: "SET_INLINE_PREVIEW_LOADING"; payload: { messageId: number } }
   | { type: "SET_INLINE_PREVIEW_DATA"; payload: { messageId: number; imageData: string } }
   | { type: "SET_INLINE_PREVIEW_ERROR"; payload: { messageId: number; error: string } }
-  | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout };
+  | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout }
+  // Reaction actions
+  | { type: "ADD_REACTION"; payload: { chatId: string; messageId: number; emoji: string } }
+  | { type: "REMOVE_REACTION"; payload: { chatId: string; messageId: number } };
 
 export const initialState: AppState = {
   connectionState: "disconnected",
@@ -262,6 +265,65 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     case "SET_MESSAGE_LAYOUT":
       return { ...state, messageLayout: action.payload };
+
+    case "ADD_REACTION": {
+      const { chatId, messageId, emoji } = action.payload;
+      const messages = state.messages[chatId];
+      if (!messages) return state;
+
+      const updatedMessages = messages.map((msg) => {
+        if (msg.id !== messageId) return msg;
+
+        const reactions = msg.reactions ?? [];
+        const existingIndex = reactions.findIndex((r) => r.emoji === emoji);
+
+        if (existingIndex >= 0) {
+          const updated = reactions.map((r, i) =>
+            i === existingIndex ? { ...r, count: r.count + 1, hasUserReacted: true } : r
+          );
+          return { ...msg, reactions: updated };
+        } else {
+          return {
+            ...msg,
+            reactions: [...reactions, { emoji, count: 1, hasUserReacted: true }],
+          };
+        }
+      });
+
+      return {
+        ...state,
+        messages: { ...state.messages, [chatId]: updatedMessages },
+      };
+    }
+
+    case "REMOVE_REACTION": {
+      const { chatId, messageId } = action.payload;
+      const messages = state.messages[chatId];
+      if (!messages) return state;
+
+      const updatedMessages = messages.map((msg) => {
+        if (msg.id !== messageId) return msg;
+
+        const reactions = msg.reactions ?? [];
+        const userReactionIndex = reactions.findIndex((r) => r.hasUserReacted);
+        if (userReactionIndex < 0) return msg;
+
+        const reaction = reactions[userReactionIndex]!;
+        if (reaction.count <= 1) {
+          return { ...msg, reactions: reactions.filter((_, i) => i !== userReactionIndex) };
+        } else {
+          const updated = reactions.map((r, i) =>
+            i === userReactionIndex ? { ...r, count: r.count - 1, hasUserReacted: false } : r
+          );
+          return { ...msg, reactions: updated };
+        }
+      });
+
+      return {
+        ...state,
+        messages: { ...state.messages, [chatId]: updatedMessages },
+      };
+    }
 
     default:
       return state;
