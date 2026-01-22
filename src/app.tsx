@@ -240,25 +240,39 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
     [state.messages, state.selectedChatId]
   );
 
-  // Reset message index to last message when chat changes, messages first load, or new message added
+  // Reset message index to last message when chat changes or messages load
+  // Track message counts per-chat to handle switching between chats correctly
   const prevChatIdRef = React.useRef<string | null>(null);
-  const prevMessageCountRef = React.useRef<number>(0);
+  const messageCounts = React.useRef<Record<string, number>>({});
   useEffect(() => {
-    const chatChanged = state.selectedChatId !== prevChatIdRef.current;
-    const messagesFirstLoaded = prevMessageCountRef.current === 0 && currentMessages.length > 0;
-    // New message added (count increased by 1, not a prepend of many)
-    const newMessageAdded = currentMessages.length === prevMessageCountRef.current + 1;
+    const chatId = state.selectedChatId;
+    const chatChanged = chatId !== prevChatIdRef.current;
+    const prevCount = chatId ? messageCounts.current[chatId] ?? 0 : 0;
+    const currentCount = currentMessages.length;
+    const isLoadingOlder = chatId ? state.loadingOlderMessages[chatId] ?? false : false;
 
-    if (chatChanged || messagesFirstLoaded || newMessageAdded) {
-      prevChatIdRef.current = state.selectedChatId;
-      if (currentMessages.length > 0) {
-        setMessageIndex(currentMessages.length - 1);
+    // Scroll to bottom on: chat switch, messages loaded/replaced, or new message added
+    // BUT NOT when loading older messages (PREPEND_MESSAGES adjusts index separately)
+    const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
+    const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
+    const newMessageAdded = currentCount === prevCount + 1;
+
+    if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || newMessageAdded) {
+      prevChatIdRef.current = chatId;
+      if (currentCount > 0) {
+        setMessageIndex(currentCount - 1);
       } else {
         setMessageIndex(0);
       }
+    } else if (messageIndex >= currentCount && currentCount > 0) {
+      // Clamp index if out of bounds
+      setMessageIndex(currentCount - 1);
     }
-    prevMessageCountRef.current = currentMessages.length;
-  }, [state.selectedChatId, currentMessages.length]);
+
+    if (chatId) {
+      messageCounts.current[chatId] = currentCount;
+    }
+  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {

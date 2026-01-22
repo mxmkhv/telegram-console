@@ -103,18 +103,39 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case "ADD_MESSAGE": {
-      const existingMessages = state.messages[action.payload.chatId] ?? [];
+      const { chatId, message } = action.payload;
+      const existingMessages = state.messages[chatId] ?? [];
       // Deduplicate: only add if message ID doesn't already exist
-      if (existingMessages.some(m => m.id === action.payload.message.id)) {
+      if (existingMessages.some(m => m.id === message.id)) {
         return state;
+      }
+      // Update chat's lastMessage, increment unreadCount if not selected, and move to top
+      const chatIndex = state.chats.findIndex((c) => c.id === chatId);
+      let updatedChats: Chat[];
+      if (chatIndex >= 0) {
+        const chat = state.chats[chatIndex]!;
+        const updatedChat = {
+          ...chat,
+          lastMessage: message,
+          unreadCount: state.selectedChatId === chatId ? chat.unreadCount : chat.unreadCount + 1,
+        };
+        // Move chat to top of list
+        updatedChats = [
+          updatedChat,
+          ...state.chats.slice(0, chatIndex),
+          ...state.chats.slice(chatIndex + 1),
+        ];
+      } else {
+        updatedChats = state.chats;
       }
       return {
         ...state,
+        chats: updatedChats,
         messages: {
           ...state.messages,
-          [action.payload.chatId]: [
+          [chatId]: [
             ...existingMessages,
-            action.payload.message,
+            message,
           ],
         },
       };
