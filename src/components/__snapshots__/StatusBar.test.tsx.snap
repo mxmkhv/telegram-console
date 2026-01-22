@@ -20,6 +20,6 @@ exports[`StatusBar renders correctly when disconnected 1`] = `
 
 exports[`StatusBar renders with different focused panels 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connected] MESSAGES                            [←: Chats] [Enter: Type] [Tab: Next] [Esc: Back] │
+│ [Connected] MESSAGES                 [R: React] [←: Chats] [Enter: Type] [Tab: Next] [Esc: Back] │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;

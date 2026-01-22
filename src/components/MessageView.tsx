@@ -1,8 +1,8 @@
 import { memo, useMemo, useState, useCallback, type Dispatch } from "react";
 import { Box, Text, useInput } from "ink";
 import type { Message, MessageLayout } from "../types";
-import { formatMediaMetadata } from '../services/imageRenderer.js';
-import type { AppAction } from '../state/reducer.js';
+import { formatMediaMetadata } from "../services/imageRenderer.js";
+import type { AppAction } from "../state/reducer.js";
 import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
 import { ReactionModal } from "./ReactionModal";
 
@@ -20,7 +20,11 @@ interface MessageViewProps {
   messageLayout: MessageLayout;
   isGroupChat: boolean;
   chatId: string | null;
-  sendReaction: (chatId: string, messageId: number, emoji: string) => Promise<boolean>;
+  sendReaction: (
+    chatId: string,
+    messageId: number,
+    emoji: string,
+  ) => Promise<boolean>;
   removeReaction: (chatId: string, messageId: number) => Promise<boolean>;
 }
 
@@ -34,7 +38,12 @@ function formatTime(date: Date): string {
 
 function formatReactions(reactions: Message["reactions"]): string {
   if (!reactions || reactions.length === 0) return "";
-  return " " + reactions.map((r) => `${r.emoji}${r.count > 1 ? r.count : ""}`).join(" ");
+  return (
+    " | " +
+    "[ " +
+    reactions.map((r) => `${r.emoji}${r.count > 1 ? r.count : ""}`).join(" ") +
+    " ]"
+  );
 }
 
 function hasUserReaction(reactions: Message["reactions"]): boolean {
@@ -67,37 +76,60 @@ const SENDER_COLORS = [
   "redBright",
 ] as const;
 
-function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, messageLayout, isGroupChat, chatId, sendReaction, removeReaction }: MessageViewProps) {
+function MessageViewInner({
+  isFocused,
+  selectedChatTitle,
+  messages: chatMessages,
+  selectedIndex,
+  isLoadingOlder = false,
+  canLoadOlder = false,
+  width,
+  dispatch,
+  messageLayout,
+  isGroupChat,
+  chatId,
+  sendReaction,
+  removeReaction,
+}: MessageViewProps) {
   // Reaction picker state
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [reactionPickerIndex, setReactionPickerIndex] = useState(0);
   const [reactionModalOpen, setReactionModalOpen] = useState(false);
-  const [flashState, setFlashState] = useState<{ messageId: number; color: string } | null>(null);
+  const [flashState, setFlashState] = useState<{
+    messageId: number;
+    color: string;
+  } | null>(null);
 
   // Handle 'r' key for reactions and Enter for media panel
-  useInput((input, key) => {
-    // 'r' key for reactions
-    if (input === 'r' || input === 'R') {
-      const selectedMessage = chatMessages[selectedIndex];
-      if (selectedMessage) {
-        if (hasUserReaction(selectedMessage.reactions)) {
-          handleRemoveReaction(selectedMessage.id);
-        } else {
-          setReactionPickerOpen(true);
-          setReactionPickerIndex(0);
+  useInput(
+    (input, key) => {
+      // 'r' key for reactions
+      if (input === "r" || input === "R") {
+        const selectedMessage = chatMessages[selectedIndex];
+        if (selectedMessage) {
+          if (hasUserReaction(selectedMessage.reactions)) {
+            handleRemoveReaction(selectedMessage.id);
+          } else {
+            setReactionPickerOpen(true);
+            setReactionPickerIndex(0);
+          }
+        }
+        return;
+      }
+
+      // Existing Enter handling for media panel
+      if (key.return) {
+        const selectedMessage = chatMessages[selectedIndex];
+        if (selectedMessage?.media) {
+          dispatch({
+            type: "OPEN_MEDIA_PANEL",
+            payload: { messageId: selectedMessage.id },
+          });
         }
       }
-      return;
-    }
-
-    // Existing Enter handling for media panel
-    if (key.return) {
-      const selectedMessage = chatMessages[selectedIndex];
-      if (selectedMessage?.media) {
-        dispatch({ type: 'OPEN_MEDIA_PANEL', payload: { messageId: selectedMessage.id } });
-      }
-    }
-  }, { isActive: isFocused && !reactionPickerOpen && !reactionModalOpen });
+    },
+    { isActive: isFocused && !reactionPickerOpen && !reactionModalOpen },
+  );
 
   // Picker navigation (left/right arrows)
   useInput(
@@ -108,85 +140,97 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
         setReactionPickerIndex((i) => Math.min(QUICK_EMOJIS.length, i + 1));
       }
     },
-    { isActive: reactionPickerOpen && !reactionModalOpen }
+    { isActive: reactionPickerOpen && !reactionModalOpen },
   );
 
   // Reaction handlers
-  const handleSendReaction = useCallback(async (emoji: string) => {
-    const messageId = chatMessages[selectedIndex]?.id;
-    if (!messageId || !chatId) return;
+  const handleSendReaction = useCallback(
+    async (emoji: string) => {
+      const messageId = chatMessages[selectedIndex]?.id;
+      if (!messageId || !chatId) return;
 
-    setReactionPickerOpen(false);
-    setReactionModalOpen(false);
+      setReactionPickerOpen(false);
+      setReactionModalOpen(false);
 
-    // Optimistic update
-    dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji } });
+      // Optimistic update
+      dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji } });
 
-    // Flash green
-    setFlashState({ messageId, color: "green" });
-    setTimeout(() => setFlashState(null), 200);
+      // Flash green
+      setFlashState({ messageId, color: "green" });
+      setTimeout(() => setFlashState(null), 200);
 
-    // API call with retry
-    let success = await sendReaction(chatId, messageId, emoji);
-    if (!success) {
-      success = await sendReaction(chatId, messageId, emoji);
-    }
+      // API call with retry
+      let success = await sendReaction(chatId, messageId, emoji);
+      if (!success) {
+        success = await sendReaction(chatId, messageId, emoji);
+      }
 
-    if (!success) {
-      // Revert and flash red twice
+      if (!success) {
+        // Revert and flash red twice
+        dispatch({ type: "REMOVE_REACTION", payload: { chatId, messageId } });
+        setFlashState({ messageId, color: "red" });
+        setTimeout(() => {
+          setFlashState(null);
+          setTimeout(() => {
+            setFlashState({ messageId, color: "red" });
+            setTimeout(() => setFlashState(null), 200);
+          }, 100);
+        }, 200);
+      }
+    },
+    [chatMessages, selectedIndex, chatId, dispatch, sendReaction],
+  );
+
+  const handleRemoveReaction = useCallback(
+    async (messageId: number) => {
+      if (!chatId) return;
+
+      // Store current reaction for potential revert
+      const msg = chatMessages.find((m) => m.id === messageId);
+      const userReaction = msg?.reactions?.find((r) => r.hasUserReacted);
+
+      // Optimistic update
       dispatch({ type: "REMOVE_REACTION", payload: { chatId, messageId } });
-      setFlashState({ messageId, color: "red" });
-      setTimeout(() => {
-        setFlashState(null);
+
+      // Flash yellow
+      setFlashState({ messageId, color: "yellow" });
+      setTimeout(() => setFlashState(null), 200);
+
+      // API call with retry
+      let success = await removeReaction(chatId, messageId);
+      if (!success) {
+        success = await removeReaction(chatId, messageId);
+      }
+
+      if (!success && userReaction) {
+        // Revert and flash red twice
+        dispatch({
+          type: "ADD_REACTION",
+          payload: { chatId, messageId, emoji: userReaction.emoji },
+        });
+        setFlashState({ messageId, color: "red" });
         setTimeout(() => {
-          setFlashState({ messageId, color: "red" });
-          setTimeout(() => setFlashState(null), 200);
-        }, 100);
-      }, 200);
-    }
-  }, [chatMessages, selectedIndex, chatId, dispatch, sendReaction]);
-
-  const handleRemoveReaction = useCallback(async (messageId: number) => {
-    if (!chatId) return;
-
-    // Store current reaction for potential revert
-    const msg = chatMessages.find((m) => m.id === messageId);
-    const userReaction = msg?.reactions?.find((r) => r.hasUserReacted);
-
-    // Optimistic update
-    dispatch({ type: "REMOVE_REACTION", payload: { chatId, messageId } });
-
-    // Flash yellow
-    setFlashState({ messageId, color: "yellow" });
-    setTimeout(() => setFlashState(null), 200);
-
-    // API call with retry
-    let success = await removeReaction(chatId, messageId);
-    if (!success) {
-      success = await removeReaction(chatId, messageId);
-    }
-
-    if (!success && userReaction) {
-      // Revert and flash red twice
-      dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji: userReaction.emoji } });
-      setFlashState({ messageId, color: "red" });
-      setTimeout(() => {
-        setFlashState(null);
-        setTimeout(() => {
-          setFlashState({ messageId, color: "red" });
-          setTimeout(() => setFlashState(null), 200);
-        }, 100);
-      }, 200);
-    }
-  }, [chatId, chatMessages, dispatch, removeReaction]);
+          setFlashState(null);
+          setTimeout(() => {
+            setFlashState({ messageId, color: "red" });
+            setTimeout(() => setFlashState(null), 200);
+          }, 100);
+        }, 200);
+      }
+    },
+    [chatId, chatMessages, dispatch, removeReaction],
+  );
 
   // Build color map: assign colors to senders in order of first appearance
   const senderColorMap = useMemo(() => {
-    const map = new Map<string, typeof SENDER_COLORS[number]>();
+    const map = new Map<string, (typeof SENDER_COLORS)[number]>();
     let colorIndex = 0;
     for (const msg of chatMessages) {
       if (!msg.isOutgoing && !map.has(msg.senderId)) {
-        map.set(msg.senderId, SENDER_COLORS[colorIndex % SENDER_COLORS.length]!);
+        map.set(
+          msg.senderId,
+          SENDER_COLORS[colorIndex % SENDER_COLORS.length]!,
+        );
         colorIndex++;
       }
     }
@@ -217,12 +261,22 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
   const { startIndex, endIndex, showScrollUp, showScrollDown } = useMemo(() => {
     const total = chatMessages.length;
     if (total === 0) {
-      return { startIndex: 0, endIndex: 0, showScrollUp: false, showScrollDown: false };
+      return {
+        startIndex: 0,
+        endIndex: 0,
+        showScrollUp: false,
+        showScrollDown: false,
+      };
     }
 
     // Check if all messages fit
     if (totalLines <= VISIBLE_LINES) {
-      return { startIndex: 0, endIndex: total, showScrollUp: false, showScrollDown: false };
+      return {
+        startIndex: 0,
+        endIndex: total,
+        showScrollUp: false,
+        showScrollDown: false,
+      };
     }
 
     // Reserve 1 line for scroll indicators when needed
@@ -244,7 +298,10 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
       const wouldNeedTopIndicator = start - 1 > 0;
       const neededReserve = wouldNeedTopIndicator ? reserveTop : 0;
 
-      if (linesUsed + prevLines + neededReserve <= availableLines - reserveBottom) {
+      if (
+        linesUsed + prevLines + neededReserve <=
+        availableLines - reserveBottom
+      ) {
         start--;
         linesUsed += prevLines;
       } else {
@@ -259,7 +316,10 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
       const neededReserve = wouldNeedBottomIndicator ? reserveBottom : 0;
       const topReserve = start > 0 ? reserveTop : 0;
 
-      if (linesUsed + nextLines + neededReserve + topReserve <= availableLines) {
+      if (
+        linesUsed + nextLines + neededReserve + topReserve <=
+        availableLines
+      ) {
         linesUsed += nextLines;
         end++;
       } else {
@@ -279,7 +339,11 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
 
   // Render a single message in bubble layout
-  const renderBubbleMessage = (msg: Message, isSelected: boolean, _actualIndex: number) => {
+  const renderBubbleMessage = (
+    msg: Message,
+    isSelected: boolean,
+    _actualIndex: number,
+  ) => {
     const showName = isGroupChat && !msg.isOutgoing;
     const textLines = msg.text ? msg.text.split("\n") : [""];
     const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
@@ -307,7 +371,9 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
           // Build content for this line
           let lineContent = line;
           if (isFirstLine && mediaInfo) {
-            lineContent = `${line} ${mediaInfo}${viewHint}`.trim() || `${mediaInfo}${viewHint}`;
+            lineContent =
+              `${line} ${mediaInfo}${viewHint}`.trim() ||
+              `${mediaInfo}${viewHint}`;
           }
 
           // Add timestamp to end of last line
@@ -318,20 +384,28 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
             // Right-aligned, blue (user's messages)
             const padding = Math.max(0, contentWidth - fullContent.length);
             return (
-              <Text key={lineIndex} inverse={isSelected} backgroundColor={flashColor}>
+              <Text
+                key={lineIndex}
+                inverse={isSelected}
+                backgroundColor={flashColor}
+              >
                 {" ".repeat(padding)}
                 <Text color="blue">{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
-                {isLastLine && <Text dimColor>{formatReactions(msg.reactions)}</Text>}
+                {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
               </Text>
             );
           } else {
             // Left-aligned, normal text (not dim for better readability)
             return (
-              <Text key={lineIndex} inverse={isSelected} backgroundColor={flashColor}>
+              <Text
+                key={lineIndex}
+                inverse={isSelected}
+                backgroundColor={flashColor}
+              >
                 <Text>{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
-                {isLastLine && <Text dimColor>{formatReactions(msg.reactions)}</Text>}
+                {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
               </Text>
             );
           }
@@ -342,100 +416,159 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
 
   if (!selectedChatTitle) {
     return (
-      <Box flexDirection="column" borderStyle="round" borderColor={isFocused ? "cyan" : "blue"} width={width} height={VISIBLE_LINES + 3} justifyContent="center" alignItems="center">
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={isFocused ? "cyan" : "blue"}
+        width={width}
+        height={VISIBLE_LINES + 3}
+        justifyContent="center"
+        alignItems="center"
+      >
         <Text dimColor>Select a chat to start</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={isFocused ? "cyan" : "blue"} width={width} height={VISIBLE_LINES + 3}>
-      <Box paddingX={1} borderStyle="single" borderBottom borderLeft={false} borderRight={false} borderTop={false}>
-        <Text bold color={isFocused ? "cyan" : undefined}>{selectedChatTitle}</Text>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={isFocused ? "cyan" : "blue"}
+      width={width}
+      height={VISIBLE_LINES + 3}
+    >
+      <Box
+        paddingX={1}
+        borderStyle="single"
+        borderBottom
+        borderLeft={false}
+        borderRight={false}
+        borderTop={false}
+      >
+        <Text bold color={isFocused ? "cyan" : undefined}>
+          {selectedChatTitle}
+        </Text>
         {totalLines > VISIBLE_LINES && (
-          <Text dimColor> ({selectedIndex + 1}/{chatMessages.length})</Text>
+          <Text dimColor>
+            {" "}
+            ({selectedIndex + 1}/{chatMessages.length})
+          </Text>
         )}
       </Box>
-      <Box flexDirection="column" paddingX={1} height={VISIBLE_LINES} overflowY="hidden">
-        {isLoadingOlder && <Text dimColor>  Loading older messages...</Text>}
-        {canLoadOlder && !isLoadingOlder && <Text color="yellow">  ↑ Press Enter to load older messages</Text>}
-        {showScrollUp && !isLoadingOlder && !canLoadOlder && <Text dimColor>  ↑ {startIndex} earlier</Text>}
-        {messageLayout === "bubble" ? (
-          // Bubble layout rendering
-          visibleMessages.map((msg, i) => {
-            const actualIndex = startIndex + i;
-            const isSelected = actualIndex === selectedIndex && isFocused;
-            if (reactionPickerOpen && actualIndex === selectedIndex) {
-              return (
-                <ReactionPicker
-                  key={msg.id}
-                  emojis={QUICK_EMOJIS}
-                  selectedIndex={reactionPickerIndex}
-                  onSelect={handleSendReaction}
-                  onOpenModal={() => {
-                    setReactionPickerOpen(false);
-                    setReactionModalOpen(true);
-                  }}
-                  onCancel={() => setReactionPickerOpen(false)}
-                />
-              );
-            }
-            return renderBubbleMessage(msg, isSelected, actualIndex);
-          })
-        ) : (
-          // Classic layout rendering (existing code)
-          visibleMessages.map((msg, i) => {
-            const actualIndex = startIndex + i;
-            const isSelected = actualIndex === selectedIndex && isFocused;
-            const isFlashing = flashState?.messageId === msg.id;
-            const flashColor = isFlashing ? flashState.color : undefined;
-
-            if (reactionPickerOpen && actualIndex === selectedIndex) {
-              return (
-                <ReactionPicker
-                  key={msg.id}
-                  emojis={QUICK_EMOJIS}
-                  selectedIndex={reactionPickerIndex}
-                  onSelect={handleSendReaction}
-                  onOpenModal={() => {
-                    setReactionPickerOpen(false);
-                    setReactionModalOpen(true);
-                  }}
-                  onCancel={() => setReactionPickerOpen(false)}
-                />
-              );
-            }
-
-            const senderName = msg.isOutgoing ? "You" : msg.senderName;
-            const nbspSenderName = senderName.replace(/ /g, "\u00A0");
-            const lines = msg.text.split("\n");
-            const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : '';
-            const viewHint = isSelected && msg.media ? ' [Press enter to view]' : '';
-            return (
-              <Box key={msg.id} flexDirection="column">
-                {lines.map((line, lineIndex) => (
-                  <Box key={lineIndex}>
-                    <Text wrap="wrap" backgroundColor={flashColor}>
-                      {lineIndex === 0 ? (
-                        <>
-                          <Text inverse={isSelected} dimColor={!isSelected}>[{formatTime(msg.timestamp)}]{"\u00A0"}</Text>
-                          <Text inverse={isSelected} bold color={msg.isOutgoing ? "blue" : getSenderColor(msg.senderId)}>{nbspSenderName}:</Text>
-                          <Text inverse={isSelected} dimColor>{mediaInfo}</Text>
-                          <Text inverse={isSelected}> {line}</Text>
-                          <Text inverse={isSelected} color="yellow">{viewHint}</Text>
-                          <Text inverse={isSelected} dimColor>{formatReactions(msg.reactions)}</Text>
-                        </>
-                      ) : (
-                        <Text inverse={isSelected} dimColor={!isSelected}>{"        "}{line}</Text>
-                      )}
-                    </Text>
-                  </Box>
-                ))}
-              </Box>
-            );
-          })
+      <Box
+        flexDirection="column"
+        paddingX={1}
+        height={VISIBLE_LINES}
+        overflowY="hidden"
+      >
+        {isLoadingOlder && <Text dimColor> Loading older messages...</Text>}
+        {canLoadOlder && !isLoadingOlder && (
+          <Text color="yellow"> ↑ Press Enter to load older messages</Text>
         )}
-        {showScrollDown && <Text dimColor>  ↓ {chatMessages.length - endIndex} more</Text>}
+        {showScrollUp && !isLoadingOlder && !canLoadOlder && (
+          <Text dimColor> ↑ {startIndex} earlier</Text>
+        )}
+        {messageLayout === "bubble"
+          ? // Bubble layout rendering
+            visibleMessages.map((msg, i) => {
+              const actualIndex = startIndex + i;
+              const isSelected = actualIndex === selectedIndex && isFocused;
+              if (reactionPickerOpen && actualIndex === selectedIndex) {
+                return (
+                  <ReactionPicker
+                    key={msg.id}
+                    emojis={QUICK_EMOJIS}
+                    selectedIndex={reactionPickerIndex}
+                    onSelect={handleSendReaction}
+                    onOpenModal={() => {
+                      setReactionPickerOpen(false);
+                      setReactionModalOpen(true);
+                    }}
+                    onCancel={() => setReactionPickerOpen(false)}
+                  />
+                );
+              }
+              return renderBubbleMessage(msg, isSelected, actualIndex);
+            })
+          : // Classic layout rendering (existing code)
+            visibleMessages.map((msg, i) => {
+              const actualIndex = startIndex + i;
+              const isSelected = actualIndex === selectedIndex && isFocused;
+              const isFlashing = flashState?.messageId === msg.id;
+              const flashColor = isFlashing ? flashState.color : undefined;
+
+              if (reactionPickerOpen && actualIndex === selectedIndex) {
+                return (
+                  <ReactionPicker
+                    key={msg.id}
+                    emojis={QUICK_EMOJIS}
+                    selectedIndex={reactionPickerIndex}
+                    onSelect={handleSendReaction}
+                    onOpenModal={() => {
+                      setReactionPickerOpen(false);
+                      setReactionModalOpen(true);
+                    }}
+                    onCancel={() => setReactionPickerOpen(false)}
+                  />
+                );
+              }
+
+              const senderName = msg.isOutgoing ? "You" : msg.senderName;
+              const nbspSenderName = senderName.replace(/ /g, "\u00A0");
+              const lines = msg.text.split("\n");
+              const mediaInfo = msg.media
+                ? ` ${formatMediaMetadata(msg.media, msg.id)}`
+                : "";
+              const viewHint =
+                isSelected && msg.media ? " [Press enter to view]" : "";
+              return (
+                <Box key={msg.id} flexDirection="column">
+                  {lines.map((line, lineIndex) => (
+                    <Box key={lineIndex}>
+                      <Text wrap="wrap" backgroundColor={flashColor}>
+                        {lineIndex === 0 ? (
+                          <>
+                            <Text inverse={isSelected} dimColor={!isSelected}>
+                              [{formatTime(msg.timestamp)}]{"\u00A0"}
+                            </Text>
+                            <Text
+                              inverse={isSelected}
+                              bold
+                              color={
+                                msg.isOutgoing
+                                  ? "blue"
+                                  : getSenderColor(msg.senderId)
+                              }
+                            >
+                              {nbspSenderName}:
+                            </Text>
+                            <Text inverse={isSelected} dimColor>
+                              {mediaInfo}
+                            </Text>
+                            <Text inverse={isSelected}> {line}</Text>
+                            <Text inverse={isSelected} color="yellow">
+                              {viewHint}
+                            </Text>
+                            <Text inverse={isSelected}>
+                              {formatReactions(msg.reactions)}
+                            </Text>
+                          </>
+                        ) : (
+                          <Text inverse={isSelected} dimColor={!isSelected}>
+                            {"        "}
+                            {line}
+                          </Text>
+                        )}
+                      </Text>
+                    </Box>
+                  ))}
+                </Box>
+              );
+            })}
+        {showScrollDown && (
+          <Text dimColor> ↓ {chatMessages.length - endIndex} more</Text>
+        )}
       </Box>
       {reactionModalOpen && (
         <Box position="absolute" marginTop={5} marginLeft={10}>
