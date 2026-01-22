@@ -1,4 +1,4 @@
-import type { Chat, Message, ConnectionState, FocusedPanel, CurrentView } from "../types";
+import type { Chat, Message, ConnectionState, FocusedPanel, CurrentView, MessageLayout } from "../types";
 
 export interface InlinePreviewState {
   loading: boolean;
@@ -27,6 +27,7 @@ export interface AppState {
   headerSelectedButton: "settings" | "logout";
   mediaPanel: MediaPanelState;
   inlinePreviews: Map<number, InlinePreviewState>;
+  messageLayout: MessageLayout;
 }
 
 export type AppAction =
@@ -53,7 +54,8 @@ export type AppAction =
   // Inline preview actions
   | { type: "SET_INLINE_PREVIEW_LOADING"; payload: { messageId: number } }
   | { type: "SET_INLINE_PREVIEW_DATA"; payload: { messageId: number; imageData: string } }
-  | { type: "SET_INLINE_PREVIEW_ERROR"; payload: { messageId: number; error: string } };
+  | { type: "SET_INLINE_PREVIEW_ERROR"; payload: { messageId: number; error: string } }
+  | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout };
 
 export const initialState: AppState = {
   connectionState: "disconnected",
@@ -74,6 +76,7 @@ export const initialState: AppState = {
     error: null,
   },
   inlinePreviews: new Map(),
+  messageLayout: "classic",
 };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -256,6 +259,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       });
       return { ...state, inlinePreviews: newPreviews };
     }
+
+    case "SET_MESSAGE_LAYOUT":
+      return { ...state, messageLayout: action.payload };
 
     default:
       return state;
