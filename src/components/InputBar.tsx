@@ -22,8 +22,8 @@ function InputBarInner({ isFocused, onSubmit, selectedChatId }: InputBarProps) {
 
   return (
     <Box
-      borderStyle="single"
-      borderColor={isFocused ? "cyan" : undefined}
+      borderStyle="round"
+      borderColor={isFocused ? "cyan" : "blue"}
       paddingX={1}
     >
       <Text bold color={isFocused ? "cyan" : "white"}>{">"} </Text>
