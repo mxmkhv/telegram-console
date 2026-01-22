@@ -39,19 +39,30 @@ function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean): number {
   return (hasName ? 1 : 0) + Math.max(1, textLines);
 }
 
-// Color palette for sender names in group chats (excluding blue which is for user)
-const SENDER_COLORS = ["green", "yellow", "magenta", "red", "cyan", "white"] as const;
-type SenderColor = typeof SENDER_COLORS[number];
+// Color palette for sender names in group chats (10 distinct colors, no blue - that's for you)
+const SENDER_COLORS = [
+  "green",
+  "yellow",
+  "magenta",
+  "red",
+  "cyan",
+  "white",
+  "greenBright",
+  "yellowBright",
+  "magentaBright",
+  "redBright",
+] as const;
 
-// Hash sender name to get consistent color - uses FNV-1a for better distribution
-function getSenderColor(senderName: string): SenderColor {
-  // FNV-1a hash
-  let hash = 2166136261;
-  for (let i = 0; i < senderName.length; i++) {
-    hash ^= senderName.charCodeAt(i);
-    hash = (hash * 16777619) >>> 0; // Multiply and convert to unsigned
+// Map senderId to color index - assigned in order of first appearance
+const senderColorMap = new Map<string, number>();
+let nextColorIndex = 0;
+
+function getSenderColor(senderId: string): typeof SENDER_COLORS[number] {
+  if (!senderColorMap.has(senderId)) {
+    senderColorMap.set(senderId, nextColorIndex);
+    nextColorIndex = (nextColorIndex + 1) % SENDER_COLORS.length;
   }
-  return SENDER_COLORS[hash % SENDER_COLORS.length]!;
+  return SENDER_COLORS[senderColorMap.get(senderId)!]!;
 }
 
 function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, messageLayout, isGroupChat }: MessageViewProps) {
@@ -152,7 +163,7 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
     const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
     const viewHint = isSelected && msg.media ? " [Enter]" : "";
     const timestamp = `[${formatTime(msg.timestamp)}]`;
-    const senderColor = getSenderColor(msg.senderName);
+    const senderColor = getSenderColor(msg.senderId);
 
     // Calculate padding for right-aligned messages
     const contentWidth = width - 4; // Account for borders and padding
@@ -249,7 +260,7 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
                       {lineIndex === 0 ? (
                         <>
                           <Text inverse={isSelected} dimColor={!isSelected}>[{formatTime(msg.timestamp)}]{"\u00A0"}</Text>
-                          <Text inverse={isSelected} bold color={msg.isOutgoing ? "blue" : getSenderColor(msg.senderName)}>{nbspSenderName}:</Text>
+                          <Text inverse={isSelected} bold color={msg.isOutgoing ? "blue" : getSenderColor(msg.senderId)}>{nbspSenderName}:</Text>
                           <Text inverse={isSelected} dimColor>{mediaInfo}</Text>
                           <Text inverse={isSelected}> {line}</Text>
                           <Text inverse={isSelected} color="yellow">{viewHint}</Text>
