@@ -1,8 +1,7 @@
-import { memo, useMemo, useCallback, type Dispatch } from "react";
+import { memo, useMemo, type Dispatch } from "react";
 import { Box, Text, useInput } from "ink";
-import type { Message, TelegramService } from "../types";
-import { MediaPlaceholder } from './MediaPlaceholder.js';
-import { MediaPreview } from './MediaPreview.js';
+import type { Message } from "../types";
+import { formatMediaMetadata } from '../services/imageRenderer.js';
 import type { AppAction } from '../state/reducer.js';
 
 const VISIBLE_LINES = 20;
@@ -16,7 +15,6 @@ interface MessageViewProps {
   canLoadOlder?: boolean;
   width: number;
   dispatch: Dispatch<AppAction>;
-  telegramService: TelegramService | null;
 }
 
 function formatTime(date: Date): string {
@@ -27,24 +25,12 @@ function formatTime(date: Date): string {
   });
 }
 
-function getMessageLineCount(msg: Message, isSelected: boolean): number {
-  let lines = msg.text.split("\n").length;
-  if (msg.media) {
-    lines += 1; // Add 1 line for MediaPlaceholder
-    if (isSelected && !msg.media.isAnimated) {
-      lines += 6; // inline preview height
-    }
-  }
-  return lines;
+function getMessageLineCount(msg: Message, _isSelected: boolean): number {
+  // Media metadata is now inline with sender, no extra lines needed
+  return msg.text.split("\n").length;
 }
 
-function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, telegramService }: MessageViewProps) {
-
-  const downloadMedia = useCallback((message: Message) => {
-    if (!telegramService) return Promise.resolve(undefined);
-    return telegramService.downloadMedia(message);
-  }, [telegramService]);
-
+function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch }: MessageViewProps) {
   // Handle Enter key to open media panel
   useInput((_input, key) => {
     if (key.return) {
@@ -160,6 +146,9 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
           const nbspSenderName = senderName.replace(/ /g, "\u00A0");
           // Split message into lines to handle newlines properly
           const lines = msg.text.split("\n");
+          // Format media metadata for inline display
+          const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : '';
+          const viewHint = isSelected && msg.media ? ' [Press enter to view]' : '';
 
           return (
             <Box key={msg.id} flexDirection="column">
@@ -170,7 +159,9 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
                       <>
                         <Text inverse={isSelected} dimColor={!isSelected}>[{formatTime(msg.timestamp)}]{"\u00A0"}</Text>
                         <Text inverse={isSelected} bold color={msg.isOutgoing ? "cyan" : "white"}>{nbspSenderName}:</Text>
+                        <Text inverse={isSelected} dimColor>{mediaInfo}</Text>
                         <Text inverse={isSelected}> {line}</Text>
+                        <Text inverse={isSelected} color="yellow">{viewHint}</Text>
                       </>
                     ) : (
                       <Text inverse={isSelected} dimColor={!isSelected}>{"        "}{line}</Text>
@@ -178,12 +169,6 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
                   </Text>
                 </Box>
               ))}
-              {msg.media && (
-                <MediaPlaceholder media={msg.media} messageId={msg.id} />
-              )}
-              {isSelected && msg.media && !msg.media.isAnimated && (
-                <MediaPreview message={msg} downloadMedia={downloadMedia} />
-              )}
             </Box>
           );
         })}
