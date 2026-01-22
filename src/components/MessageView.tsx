@@ -27,6 +27,15 @@ function formatTime(date: Date): string {
   });
 }
 
+function formatReactions(reactions: Message["reactions"]): string {
+  if (!reactions || reactions.length === 0) return "";
+  return " " + reactions.map((r) => `${r.emoji}${r.count > 1 ? r.count : ""}`).join(" ");
+}
+
+function hasUserReaction(reactions: Message["reactions"]): boolean {
+  return reactions?.some((r) => r.hasUserReacted) ?? false;
+}
+
 function getMessageLineCount(msg: Message, _isSelected: boolean): number {
   // Media metadata is now inline with sender, no extra lines needed
   return msg.text.split("\n").length;
@@ -170,6 +179,7 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
     const viewHint = isSelected && msg.media ? " [Enter]" : "";
     const timestamp = `[${formatTime(msg.timestamp)}]`;
     const senderColor = getSenderColor(msg.senderId);
+    const userReacted = hasUserReaction(msg.reactions);
 
     // Calculate padding for right-aligned messages
     const contentWidth = width - 4; // Account for borders and padding
@@ -200,18 +210,20 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
             // Right-aligned, blue (user's messages)
             const padding = Math.max(0, contentWidth - fullContent.length);
             return (
-              <Text key={lineIndex} inverse={isSelected}>
+              <Text key={lineIndex} inverse={isSelected} backgroundColor={userReacted && !isSelected ? "gray" : undefined}>
                 {" ".repeat(padding)}
                 <Text color="blue">{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
+                {isLastLine && <Text dimColor>{formatReactions(msg.reactions)}</Text>}
               </Text>
             );
           } else {
             // Left-aligned, normal text (not dim for better readability)
             return (
-              <Text key={lineIndex} inverse={isSelected}>
+              <Text key={lineIndex} inverse={isSelected} backgroundColor={userReacted && !isSelected ? "gray" : undefined}>
                 <Text>{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
+                {isLastLine && <Text dimColor>{formatReactions(msg.reactions)}</Text>}
               </Text>
             );
           }
@@ -257,12 +269,13 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
             const lines = msg.text.split("\n");
             const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : '';
             const viewHint = isSelected && msg.media ? ' [Press enter to view]' : '';
+            const userReacted = hasUserReaction(msg.reactions);
 
             return (
               <Box key={msg.id} flexDirection="column">
                 {lines.map((line, lineIndex) => (
                   <Box key={lineIndex}>
-                    <Text wrap="wrap">
+                    <Text wrap="wrap" backgroundColor={userReacted && !isSelected ? "gray" : undefined}>
                       {lineIndex === 0 ? (
                         <>
                           <Text inverse={isSelected} dimColor={!isSelected}>[{formatTime(msg.timestamp)}]{"\u00A0"}</Text>
@@ -270,6 +283,7 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
                           <Text inverse={isSelected} dimColor>{mediaInfo}</Text>
                           <Text inverse={isSelected}> {line}</Text>
                           <Text inverse={isSelected} color="yellow">{viewHint}</Text>
+                          <Text inverse={isSelected} dimColor>{formatReactions(msg.reactions)}</Text>
                         </>
                       ) : (
                         <Text inverse={isSelected} dimColor={!isSelected}>{"        "}{line}</Text>
