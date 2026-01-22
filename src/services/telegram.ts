@@ -69,8 +69,8 @@ export interface TelegramServiceOptions {
 export function createTelegramService(options: TelegramServiceOptions): TelegramService & { client: TelegramClient } {
   const { apiId, apiHash, session = "", onSessionUpdate } = options;
   const stringSession = new StringSession(session);
-  // @ts-expect-error - GramJS accepts string or number for apiId
-  const client = new TelegramClient(stringSession, apiId, apiHash, {
+  const numericApiId = typeof apiId === "string" ? parseInt(apiId, 10) : apiId;
+  const client = new TelegramClient(stringSession, numericApiId, apiHash, {
     connectionRetries: 5,
   });
 
