@@ -46,7 +46,7 @@ function StatusBarInner({ connectionState, focusedPanel }: StatusBarProps) {
   };
 
   return (
-    <Box borderStyle="single" paddingX={1} justifyContent="space-between">
+    <Box borderStyle="round" paddingX={1} justifyContent="space-between">
       <Text>
         [<Text color={getStatusColor(connectionState)}>{getStatusText(connectionState)}</Text>]
         {" "}
