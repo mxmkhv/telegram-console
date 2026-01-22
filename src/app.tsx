@@ -6,8 +6,7 @@ import { MessageView } from "./components/MessageView";
 import { InputBar } from "./components/InputBar";
 import { StatusBar } from "./components/StatusBar";
 import { Setup } from "./components/Setup";
-import { WelcomeNew } from "./components/WelcomeNew";
-import { WelcomeBack } from "./components/WelcomeBack";
+import { WelcomeSplash } from "./components/WelcomeSplash";
 import { HeaderBar } from "./components/HeaderBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
@@ -491,11 +490,7 @@ export function App({ useMock = false }: AppProps) {
   }
 
   if (showWelcome) {
-    return isReturningUser ? (
-      <WelcomeBack userName={userName} onContinue={handleWelcomeDismiss} />
-    ) : (
-      <WelcomeNew userName={userName} onContinue={handleWelcomeDismiss} />
-    );
+    return <WelcomeSplash onContinue={handleWelcomeDismiss} />;
   }
 
   return (

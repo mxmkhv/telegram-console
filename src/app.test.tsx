@@ -9,9 +9,11 @@ describe("App Integration", () => {
     expect(lastFrame()).toBeDefined();
   });
 
-  it("shows welcome message on initial render", () => {
+  it("shows setup screen when no config exists", () => {
     const { lastFrame } = render(<App useMock />);
     const frame = lastFrame();
-    expect(frame).toContain("Welcome");
+    // Without config, Setup is shown first (which contains "Welcome to telegram-console-client!")
+    // WelcomeSplash is shown after setup completes
+    expect(frame).toContain("Welcome to telegram-console-client");
   });
 });
