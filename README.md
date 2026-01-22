@@ -4,11 +4,7 @@
   <img src="logo.png" alt="Telegram Console" width="600">
 </p>
 
-A terminal-based Telegram client for technical users.
-
-<p align="center">
-  <img src="screenshot.png" alt="Screenshot" width="800">
-</p>
+A terminal-based Telegram client for technical users. Seamlessly and discretely keep track of your group chats while you watch Claude do your job.
 
 ## Installation
 
@@ -55,6 +51,10 @@ By using the Telegram API, you agree to Telegram's [API Terms of Service](https:
 ```bash
 telegram-console
 ```
+
+<p align="center">
+  <img src="screenshot.png" alt="Screenshot" width="800">
+</p>
 
 ### Keyboard Shortcuts
 
