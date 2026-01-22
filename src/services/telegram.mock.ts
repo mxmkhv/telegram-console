@@ -127,5 +127,13 @@ export function createMockTelegramService(): TelegramService {
       // Mock: always succeed
       return true;
     },
+
+    async sendReaction(_chatId: string, _messageId: number, _emoji: string): Promise<boolean> {
+      return true;
+    },
+
+    async removeReaction(_chatId: string, _messageId: number): Promise<boolean> {
+      return true;
+    },
   };
 }

@@ -66,6 +66,8 @@ export interface TelegramService {
   getMessages(chatId: string, limit?: number, offsetId?: number): Promise<Message[]>;
   sendMessage(chatId: string, text: string): Promise<Message>;
   markAsRead(chatId: string, maxMessageId?: number): Promise<boolean>;
+  sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean>;
+  removeReaction(chatId: string, messageId: number): Promise<boolean>;
   onConnectionStateChange(callback: (state: ConnectionState) => void): () => void;
   onNewMessage(callback: (message: Message, chatId: string) => void): () => void;
   downloadMedia(message: Message): Promise<Buffer | undefined>;

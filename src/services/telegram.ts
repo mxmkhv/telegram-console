@@ -207,6 +207,37 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         return false;
       }
     },
+
+    async sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean> {
+      try {
+        await client.invoke(
+          new Api.messages.SendReaction({
+            peer: chatId,
+            msgId: messageId,
+            reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
+            addToRecent: true,
+          })
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    async removeReaction(chatId: string, messageId: number): Promise<boolean> {
+      try {
+        await client.invoke(
+          new Api.messages.SendReaction({
+            peer: chatId,
+            msgId: messageId,
+            reaction: [],
+          })
+        );
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
 }
 
