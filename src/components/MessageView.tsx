@@ -1,8 +1,7 @@
-import { memo, useMemo, useCallback, type Dispatch } from "react";
+import { memo, useMemo, type Dispatch } from "react";
 import { Box, Text, useInput } from "ink";
-import type { Message, TelegramService } from "../types";
-import { MediaPlaceholder } from './MediaPlaceholder.js';
-import { MediaPreview } from './MediaPreview.js';
+import type { Message, MessageLayout } from "../types";
+import { formatMediaMetadata } from '../services/imageRenderer.js';
 import type { AppAction } from '../state/reducer.js';
 
 const VISIBLE_LINES = 20;
@@ -16,7 +15,8 @@ interface MessageViewProps {
   canLoadOlder?: boolean;
   width: number;
   dispatch: Dispatch<AppAction>;
-  telegramService: TelegramService | null;
+  messageLayout: MessageLayout;
+  isGroupChat: boolean;
 }
 
 function formatTime(date: Date): string {
@@ -27,24 +27,33 @@ function formatTime(date: Date): string {
   });
 }
 
-function getMessageLineCount(msg: Message, isSelected: boolean): number {
-  let lines = msg.text.split("\n").length;
-  if (msg.media) {
-    lines += 1; // Add 1 line for MediaPlaceholder
-    if (isSelected && !msg.media.isAnimated) {
-      lines += 6; // inline preview height
-    }
-  }
-  return lines;
+function getMessageLineCount(msg: Message, _isSelected: boolean): number {
+  // Media metadata is now inline with sender, no extra lines needed
+  return msg.text.split("\n").length;
 }
 
-function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, telegramService }: MessageViewProps) {
+function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean): number {
+  const textLines = msg.text ? msg.text.split("\n").length : 0;
+  const hasName = isGroupChat && !msg.isOutgoing;
+  // name line (if group + not outgoing) + text lines (timestamp is inline on last line)
+  return (hasName ? 1 : 0) + Math.max(1, textLines);
+}
 
-  const downloadMedia = useCallback((message: Message) => {
-    if (!telegramService) return Promise.resolve(undefined);
-    return telegramService.downloadMedia(message);
-  }, [telegramService]);
+// 10 distinct colors for senders (no blue - that's for you)
+const SENDER_COLORS = [
+  "green",
+  "yellow",
+  "magenta",
+  "red",
+  "cyan",
+  "white",
+  "greenBright",
+  "yellowBright",
+  "magentaBright",
+  "redBright",
+] as const;
 
+function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, messageLayout, isGroupChat }: MessageViewProps) {
   // Handle Enter key to open media panel
   useInput((_input, key) => {
     if (key.return) {
@@ -55,13 +64,34 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
     }
   }, { isActive: isFocused });
 
+  // Build color map: assign colors to senders in order of first appearance
+  const senderColorMap = useMemo(() => {
+    const map = new Map<string, typeof SENDER_COLORS[number]>();
+    let colorIndex = 0;
+    for (const msg of chatMessages) {
+      if (!msg.isOutgoing && !map.has(msg.senderId)) {
+        map.set(msg.senderId, SENDER_COLORS[colorIndex % SENDER_COLORS.length]!);
+        colorIndex++;
+      }
+    }
+    return map;
+  }, [chatMessages]);
+
+  // Get color for a sender
+  const getSenderColor = (senderId: string) => {
+    return senderColorMap.get(senderId) ?? "white";
+  };
+
   // Calculate line count for each message
   const messageLineCounts = useMemo(() => {
     return chatMessages.map((msg, index) => {
       const isSelected = index === selectedIndex && isFocused;
+      if (messageLayout === "bubble") {
+        return getBubbleMessageLineCount(msg, isGroupChat);
+      }
       return getMessageLineCount(msg, isSelected);
     });
-  }, [chatMessages, selectedIndex, isFocused]);
+  }, [chatMessages, selectedIndex, isFocused, messageLayout, isGroupChat]);
 
   const totalLines = useMemo(() => {
     return messageLineCounts.reduce((sum, count) => sum + count, 0);
@@ -132,6 +162,64 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
 
+  // Render a single message in bubble layout
+  const renderBubbleMessage = (msg: Message, isSelected: boolean, _actualIndex: number) => {
+    const showName = isGroupChat && !msg.isOutgoing;
+    const textLines = msg.text ? msg.text.split("\n") : [""];
+    const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
+    const viewHint = isSelected && msg.media ? " [Enter]" : "";
+    const timestamp = `[${formatTime(msg.timestamp)}]`;
+    const senderColor = getSenderColor(msg.senderId);
+
+    // Calculate padding for right-aligned messages
+    const contentWidth = width - 4; // Account for borders and padding
+
+    return (
+      <Box key={msg.id} flexDirection="column">
+        {/* Sender name (groups only, others only) - with unique color */}
+        {showName && (
+          <Text color={senderColor}>{msg.senderName || "Unknown"}</Text>
+        )}
+
+        {/* Message content with inline timestamp on last line */}
+        {textLines.map((line, lineIndex) => {
+          const isLastLine = lineIndex === textLines.length - 1;
+          const isFirstLine = lineIndex === 0;
+
+          // Build content for this line
+          let lineContent = line;
+          if (isFirstLine && mediaInfo) {
+            lineContent = `${line} ${mediaInfo}${viewHint}`.trim() || `${mediaInfo}${viewHint}`;
+          }
+
+          // Add timestamp to end of last line
+          const suffix = isLastLine ? ` ${timestamp}` : "";
+          const fullContent = lineContent + suffix;
+
+          if (msg.isOutgoing) {
+            // Right-aligned, blue (user's messages)
+            const padding = Math.max(0, contentWidth - fullContent.length);
+            return (
+              <Text key={lineIndex} inverse={isSelected}>
+                {" ".repeat(padding)}
+                <Text color="blue">{lineContent}</Text>
+                {isLastLine && <Text dimColor> {timestamp}</Text>}
+              </Text>
+            );
+          } else {
+            // Left-aligned, normal text (not dim for better readability)
+            return (
+              <Text key={lineIndex} inverse={isSelected}>
+                <Text>{lineContent}</Text>
+                {isLastLine && <Text dimColor> {timestamp}</Text>}
+              </Text>
+            );
+          }
+        })}
+      </Box>
+    );
+  };
+
   if (!selectedChatTitle) {
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={isFocused ? "cyan" : "blue"} width={width} height={VISIBLE_LINES + 3} justifyContent="center" alignItems="center">
@@ -152,41 +240,47 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
         {isLoadingOlder && <Text dimColor>  Loading older messages...</Text>}
         {canLoadOlder && !isLoadingOlder && <Text color="yellow">  ↑ Press Enter to load older messages</Text>}
         {showScrollUp && !isLoadingOlder && !canLoadOlder && <Text dimColor>  ↑ {startIndex} earlier</Text>}
-        {visibleMessages.map((msg, i) => {
-          const actualIndex = startIndex + i;
-          const isSelected = actualIndex === selectedIndex && isFocused;
-          const senderName = msg.isOutgoing ? "You" : msg.senderName;
-          // Replace spaces in sender name with non-breaking spaces to prevent wrapping
-          const nbspSenderName = senderName.replace(/ /g, "\u00A0");
-          // Split message into lines to handle newlines properly
-          const lines = msg.text.split("\n");
+        {messageLayout === "bubble" ? (
+          // Bubble layout rendering
+          visibleMessages.map((msg, i) => {
+            const actualIndex = startIndex + i;
+            const isSelected = actualIndex === selectedIndex && isFocused;
+            return renderBubbleMessage(msg, isSelected, actualIndex);
+          })
+        ) : (
+          // Classic layout rendering (existing code)
+          visibleMessages.map((msg, i) => {
+            const actualIndex = startIndex + i;
+            const isSelected = actualIndex === selectedIndex && isFocused;
+            const senderName = msg.isOutgoing ? "You" : msg.senderName;
+            const nbspSenderName = senderName.replace(/ /g, "\u00A0");
+            const lines = msg.text.split("\n");
+            const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : '';
+            const viewHint = isSelected && msg.media ? ' [Press enter to view]' : '';
 
-          return (
-            <Box key={msg.id} flexDirection="column">
-              {lines.map((line, lineIndex) => (
-                <Box key={lineIndex}>
-                  <Text wrap="wrap">
-                    {lineIndex === 0 ? (
-                      <>
-                        <Text inverse={isSelected} dimColor={!isSelected}>[{formatTime(msg.timestamp)}]{"\u00A0"}</Text>
-                        <Text inverse={isSelected} bold color={msg.isOutgoing ? "cyan" : "white"}>{nbspSenderName}:</Text>
-                        <Text inverse={isSelected}> {line}</Text>
-                      </>
-                    ) : (
-                      <Text inverse={isSelected} dimColor={!isSelected}>{"        "}{line}</Text>
-                    )}
-                  </Text>
-                </Box>
-              ))}
-              {msg.media && (
-                <MediaPlaceholder media={msg.media} messageId={msg.id} />
-              )}
-              {isSelected && msg.media && !msg.media.isAnimated && (
-                <MediaPreview message={msg} downloadMedia={downloadMedia} />
-              )}
-            </Box>
-          );
-        })}
+            return (
+              <Box key={msg.id} flexDirection="column">
+                {lines.map((line, lineIndex) => (
+                  <Box key={lineIndex}>
+                    <Text wrap="wrap">
+                      {lineIndex === 0 ? (
+                        <>
+                          <Text inverse={isSelected} dimColor={!isSelected}>[{formatTime(msg.timestamp)}]{"\u00A0"}</Text>
+                          <Text inverse={isSelected} bold color={msg.isOutgoing ? "blue" : getSenderColor(msg.senderId)}>{nbspSenderName}:</Text>
+                          <Text inverse={isSelected} dimColor>{mediaInfo}</Text>
+                          <Text inverse={isSelected}> {line}</Text>
+                          <Text inverse={isSelected} color="yellow">{viewHint}</Text>
+                        </>
+                      ) : (
+                        <Text inverse={isSelected} dimColor={!isSelected}>{"        "}{line}</Text>
+                      )}
+                    </Text>
+                  </Box>
+                ))}
+              </Box>
+            );
+          })
+        )}
         {showScrollDown && <Text dimColor>  ↓ {chatMessages.length - endIndex} more</Text>}
       </Box>
     </Box>

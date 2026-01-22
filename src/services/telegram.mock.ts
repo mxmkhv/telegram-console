@@ -122,5 +122,10 @@ export function createMockTelegramService(): TelegramService {
       // Mock: return undefined since we don't have real media in mock
       return undefined;
     },
+
+    async markAsRead(_chatId: string, _maxMessageId?: number): Promise<boolean> {
+      // Mock: always succeed
+      return true;
+    },
   };
 }

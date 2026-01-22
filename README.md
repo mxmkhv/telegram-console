@@ -1,5 +1,9 @@
 # telegram-console-client
 
+<p align="center">
+  <img src="logo.png" alt="Telegram Console" width="600">
+</p>
+
 A terminal-based Telegram client for technical users.
 
 ## Installation
@@ -12,10 +16,27 @@ bun install -g telegram-console-client
 
 ## Setup
 
-1. Get API credentials at https://my.telegram.org/apps
-2. Run `telegram-console-client`
-3. Enter your API ID and API Hash
-4. Scan QR code with Telegram app (or use phone auth)
+### Step 1: Get Telegram API Credentials
+
+1. Go to [my.telegram.org](https://my.telegram.org/auth) and log in with your phone number
+2. You'll receive a confirmation code in Telegram - enter it
+3. Click on **"API development tools"**
+4. Fill in the form:
+   - **App title**: Any name (e.g., "My Console Client")
+   - **Short name**: A short identifier (e.g., "console")
+   - Platform, description, and other fields can be left as default
+5. Click **"Create application"**
+6. You'll see your **API ID** (a number) and **API Hash** (a string) - save these
+
+> **Important**: Never share your API credentials. They give full access to your Telegram account.
+
+### Step 2: Run the Client
+
+1. Run `telegram-console-client`
+2. Enter your API ID and API Hash when prompted
+3. Authenticate using one of these methods:
+   - **QR Code** (default): Scan the QR code with Telegram mobile app (Settings → Devices → Link Desktop Device)
+   - **Phone Code**: Enter your phone number and the code sent to your Telegram
 
 ## Usage
 

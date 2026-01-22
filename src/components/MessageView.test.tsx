@@ -32,6 +32,8 @@ const mockMessages: Message[] = [
   },
 ];
 
+const mockDispatch = () => {};
+
 function renderWithProvider(ui: React.ReactElement) {
   return render(<AppProvider>{ui}</AppProvider>);
 }
@@ -45,6 +47,7 @@ describe("MessageView", () => {
         messages={[]}
         selectedIndex={0}
         width={50}
+        dispatch={mockDispatch}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -58,6 +61,7 @@ describe("MessageView", () => {
         messages={[]}
         selectedIndex={0}
         width={50}
+        dispatch={mockDispatch}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -71,6 +75,7 @@ describe("MessageView", () => {
         messages={mockMessages}
         selectedIndex={0}
         width={50}
+        dispatch={mockDispatch}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -84,6 +89,7 @@ describe("MessageView", () => {
         messages={mockMessages}
         selectedIndex={1}
         width={50}
+        dispatch={mockDispatch}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -97,6 +103,7 @@ describe("MessageView", () => {
         messages={mockMessages}
         selectedIndex={1}
         width={50}
+        dispatch={mockDispatch}
       />
     );
     // Snapshot will capture the styling including cyan color for "You"

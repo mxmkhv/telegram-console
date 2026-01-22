@@ -1,8 +1,48 @@
-import React, { memo, useMemo } from "react";
+import { memo, useMemo } from "react";
 import { Box, Text } from "ink";
 import type { Chat } from "../types";
 
-const VISIBLE_ITEMS = 20;
+// Layout constants
+const LIST_HEIGHT = 18; // Number of chat items to show
+const INDICATOR_LINES = 2; // Top and bottom scroll indicators
+const HEADER_LINES = 2; // Header text + border
+const BORDER_LINES = 2; // Round border top + bottom
+const TOTAL_HEIGHT = LIST_HEIGHT + INDICATOR_LINES + HEADER_LINES + BORDER_LINES; // 24
+
+// Memoized row component
+const ChatRow = memo(function ChatRow({
+  chat,
+  isSelected,
+  isActive,
+}: {
+  chat: Chat;
+  isSelected: boolean;
+  isActive: boolean;
+}) {
+  const hasUnread = chat.unreadCount > 0;
+  const unreadIndicator = hasUnread ? "● " : "  ";
+  const groupIndicator = chat.isGroup ? "# " : "  ";
+  const title = chat.title.slice(0, 26);
+  const suffix = hasUnread ? ` (${chat.unreadCount})` : "";
+
+  return (
+    <Text>
+      <Text color={hasUnread ? "cyan" : undefined} inverse={isSelected}>
+        {unreadIndicator}
+      </Text>
+      <Text color={chat.isGroup ? "magenta" : undefined} inverse={isSelected}>
+        {groupIndicator}
+      </Text>
+      <Text
+        inverse={isSelected}
+        bold={hasUnread || isActive}
+        color={isActive ? "cyan" : undefined}
+      >
+        {title}{suffix}
+      </Text>
+    </Text>
+  );
+});
 
 interface ChatListProps {
   chats: Chat[];
@@ -13,66 +53,66 @@ interface ChatListProps {
 }
 
 function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused }: ChatListProps) {
-  // Calculate visible window to keep selectedIndex in view
-  const { startIndex, endIndex } = useMemo(() => {
+  const { visibleChats, visibleStartIndex, itemsAbove, itemsBelow } = useMemo(() => {
     const total = chats.length;
-    if (total <= VISIBLE_ITEMS) {
-      return { startIndex: 0, endIndex: total };
+
+    if (total <= LIST_HEIGHT) {
+      return {
+        visibleChats: chats,
+        visibleStartIndex: 0,
+        itemsAbove: 0,
+        itemsBelow: 0,
+      };
     }
 
-    // Keep selection visible with some context
-    let start = Math.max(0, selectedIndex - Math.floor(VISIBLE_ITEMS / 2));
-    start = Math.min(start, total - VISIBLE_ITEMS);
+    let start = Math.max(0, selectedIndex - Math.floor(LIST_HEIGHT / 2));
+    start = Math.min(start, total - LIST_HEIGHT);
+    const end = start + LIST_HEIGHT;
 
     return {
-      startIndex: start,
-      endIndex: start + VISIBLE_ITEMS,
+      visibleChats: chats.slice(start, end),
+      visibleStartIndex: start,
+      itemsAbove: start,
+      itemsBelow: total - end,
     };
   }, [chats, selectedIndex]);
 
-  const showScrollUp = startIndex > 0;
-  const showScrollDown = endIndex < chats.length;
-
-  // Adjust visible range to account for scroll indicators
-  const adjustedStart = showScrollUp ? startIndex + 1 : startIndex;
-  const adjustedEnd = showScrollDown ? endIndex - 1 : endIndex;
-  const visibleChats = chats.slice(adjustedStart, adjustedEnd);
-
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={isFocused ? "cyan" : "blue"} width={35} height={VISIBLE_ITEMS + 3}>
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={isFocused ? "cyan" : "blue"}
+      width={35}
+      height={TOTAL_HEIGHT}
+    >
+      {/* Header */}
       <Box paddingX={1} borderStyle="single" borderBottom borderLeft={false} borderRight={false} borderTop={false}>
         <Text bold color={isFocused ? "cyan" : undefined}>Chats</Text>
-        {chats.length > VISIBLE_ITEMS && (
+        {chats.length > LIST_HEIGHT && (
           <Text dimColor> ({selectedIndex + 1}/{chats.length})</Text>
         )}
       </Box>
-      <Box flexDirection="column" paddingX={1} height={VISIBLE_ITEMS}>
-        {showScrollUp && <Text dimColor>  ↑ {startIndex} more</Text>}
-        {visibleChats.map((chat, i) => {
-          const actualIndex = adjustedStart + i;
-          const isSelected = actualIndex === selectedIndex && isFocused;
-          const isActive = chat.id === selectedChatId;
-          const hasUnread = chat.unreadCount > 0;
 
+      {/* List area */}
+      <Box flexDirection="column" paddingX={1}>
+        {/* Top indicator */}
+        <Text dimColor>{itemsAbove > 0 ? `  ↑ ${itemsAbove} more` : " "}</Text>
+
+        {/* Chat items - one Text per line, newline separated */}
+        {visibleChats.map((chat, i) => {
+          const globalIndex = visibleStartIndex + i;
           return (
-            <Box key={chat.id}>
-              {hasUnread ? (
-                <Text color="cyan" inverse={isSelected}>● </Text>
-              ) : (
-                <Text inverse={isSelected}>  </Text>
-              )}
-              <Text
-                inverse={isSelected}
-                bold={hasUnread || isActive}
-                color={isActive ? "cyan" : undefined}
-              >
-                {chat.title.slice(0, 28)}
-                {hasUnread ? ` (${chat.unreadCount})` : ""}
-              </Text>
-            </Box>
+            <ChatRow
+              key={chat.id}
+              chat={chat}
+              isSelected={isFocused && globalIndex === selectedIndex}
+              isActive={chat.id === selectedChatId}
+            />
           );
         })}
-        {showScrollDown && <Text dimColor>  ↓ {chats.length - endIndex} more</Text>}
+
+        {/* Bottom indicator */}
+        <Text dimColor>{itemsBelow > 0 ? `  ↓ ${itemsBelow} more` : " "}</Text>
       </Box>
     </Box>
   );

@@ -79,14 +79,24 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
     };
   }, [telegramService, dispatch]);
 
-  // Load messages when chat is selected
+  // Load messages when chat is selected and mark as read
   useEffect(() => {
     if (state.selectedChatId) {
-      telegramService.getMessages(state.selectedChatId).then((messages) => {
+      const chatId = state.selectedChatId;
+      telegramService.getMessages(chatId).then((messages) => {
         dispatch({
           type: "SET_MESSAGES",
-          payload: { chatId: state.selectedChatId!, messages },
+          payload: { chatId, messages },
         });
+        // Mark messages as read and clear unread count
+        if (messages.length > 0) {
+          const lastMessageId = messages[messages.length - 1]!.id;
+          telegramService.markAsRead(chatId, lastMessageId).then((success) => {
+            if (success) {
+              dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
+            }
+          });
+        }
       });
     }
   }, [state.selectedChatId, telegramService, dispatch]);
@@ -345,7 +355,8 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
               canLoadOlder={canLoadOlder}
               width={messageViewWidth}
               dispatch={dispatch}
-              telegramService={telegramService}
+              messageLayout={state.messageLayout}
+              isGroupChat={selectedChat?.isGroup ?? false}
             />
             {state.mediaPanel.isOpen && mediaPanelMessage && (
               <MediaPanel

@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import type { AppConfig } from "../types";
+import type { AppConfig, MessageLayout } from "../types";
 
 const CONFIG_FILENAME = "config.json";
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "telegram-console-client");
@@ -23,7 +23,13 @@ export function loadConfig(customDir?: string): AppConfig | null {
   if (!existsSync(path)) return null;
 
   const content = readFileSync(path, "utf-8");
-  return JSON.parse(content) as AppConfig;
+  const config = JSON.parse(content) as Partial<AppConfig>;
+
+  // Provide default for messageLayout if missing (backwards compatibility)
+  return {
+    ...config,
+    messageLayout: config.messageLayout ?? "classic",
+  } as AppConfig;
 }
 
 export function saveConfig(config: AppConfig, customDir?: string): void {
@@ -49,6 +55,7 @@ export function loadConfigWithEnvOverrides(customDir?: string): AppConfig | null
     sessionPersistence: (process.env.TG_SESSION_MODE as AppConfig["sessionPersistence"]) ?? config.sessionPersistence,
     logLevel: (process.env.TG_LOG_LEVEL as AppConfig["logLevel"]) ?? config.logLevel,
     authMethod: (process.env.TG_AUTH_METHOD as AppConfig["authMethod"]) ?? config.authMethod,
+    messageLayout: (process.env.TG_MESSAGE_LAYOUT as MessageLayout) ?? config.messageLayout,
   };
 }
 

@@ -30,8 +30,10 @@ function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
         telegram-console
       </Text>
       <Box>
+        {/* TODO: finish bubble layout
         <Text {...settingsStyle}>[Settings]</Text>
         <Text> </Text>
+        */}
         <Text {...logoutStyle}>[Logout]</Text>
       </Box>
     </Box>
