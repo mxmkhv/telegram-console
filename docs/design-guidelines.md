@@ -9,7 +9,7 @@ Treat the terminal as a unique medium, not a web browser.
 
 - **Constraint-First Design:** Respect the grid. Elements must align to character cells.
 - **Keyboard Supremacy:** The UI must be fully navigable without a mouse. Visual states must reflect focus instantly.
-- **Performance is Visibility:** In a terminal, "jank" manifests as screen flickering. Render performance is critical.
+- **Performance is Visibility:** In a terminal, "jank" manifests as screen flickering. Render performance is critical for UX.
 
 ## 2. Visual Architecture
 

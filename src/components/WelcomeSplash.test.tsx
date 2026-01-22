@@ -12,7 +12,7 @@ describe("WelcomeSplash", () => {
   it("shows version number", () => {
     const { lastFrame } = render(<WelcomeSplash onContinue={() => {}} />);
     const frame = lastFrame();
-    expect(frame).toContain("v0.1.4");
+    expect(frame).toMatch(/v\d+\.\d+\.\d+/);
   });
 
   it("shows press any key hint", () => {

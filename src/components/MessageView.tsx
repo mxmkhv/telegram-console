@@ -7,6 +7,7 @@ import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
 import { ReactionModal } from "./ReactionModal";
 
 const VISIBLE_LINES = 20;
+const TOTAL_HEIGHT = 24; // Match ChatList height
 
 interface MessageViewProps {
   isFocused: boolean;
@@ -390,7 +391,7 @@ function MessageViewInner({
                 backgroundColor={flashColor}
               >
                 {" ".repeat(padding)}
-                <Text color="blue">{lineContent}</Text>
+                <Text color={isSelected ? undefined : "blue"}>{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
                 {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
               </Text>
@@ -421,7 +422,7 @@ function MessageViewInner({
         borderStyle="round"
         borderColor={isFocused ? "cyan" : "blue"}
         width={width}
-        height={VISIBLE_LINES + 3}
+        height={TOTAL_HEIGHT}
         justifyContent="center"
         alignItems="center"
       >
@@ -436,7 +437,7 @@ function MessageViewInner({
       borderStyle="round"
       borderColor={isFocused ? "cyan" : "blue"}
       width={width}
-      height={VISIBLE_LINES + 3}
+      height={TOTAL_HEIGHT}
     >
       <Box
         paddingX={1}
@@ -523,7 +524,7 @@ function MessageViewInner({
               const viewHint =
                 isSelected && msg.media ? " [Press enter to view]" : "";
               return (
-                <Box key={msg.id} flexDirection="column">
+                <Box key={msg.id} flexDirection="column" flexGrow={1}>
                   {lines.map((line, lineIndex) => (
                     <Box key={lineIndex}>
                       <Text wrap="wrap" backgroundColor={flashColor}>
@@ -536,9 +537,11 @@ function MessageViewInner({
                               inverse={isSelected}
                               bold
                               color={
-                                msg.isOutgoing
-                                  ? "blue"
-                                  : getSenderColor(msg.senderId)
+                                isSelected
+                                  ? undefined // No color when selected (use inverse colors)
+                                  : msg.isOutgoing
+                                    ? "blue"
+                                    : getSenderColor(msg.senderId)
                               }
                             >
                               {nbspSenderName}:

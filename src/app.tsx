@@ -11,7 +11,8 @@ import { HeaderBar } from "./components/HeaderBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
 import { MediaPanel } from "./components/MediaPanel";
-import { hasConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, sessionExists, loadSession, saveSession } from "./config";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { hasConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService } from "./services/telegram.mock";
 import type { AppConfig, TelegramService, LogoutMode } from "./types";
@@ -56,6 +57,25 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
     dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
   }, [dispatch]);
 
+  // Memoize service method bindings to prevent new refs on every render
+  const sendReaction = useCallback(
+    (chatId: string, messageId: number, emoji: string) =>
+      telegramService.sendReaction(chatId, messageId, emoji),
+    [telegramService]
+  );
+
+  const removeReaction = useCallback(
+    (chatId: string, messageId: number) =>
+      telegramService.removeReaction(chatId, messageId),
+    [telegramService]
+  );
+
+  const downloadMedia = useCallback(
+    (message: Parameters<typeof telegramService.downloadMedia>[0]) =>
+      telegramService.downloadMedia(message),
+    [telegramService]
+  );
+
   // Initialize connection and load chats
   useEffect(() => {
     const init = async () => {
@@ -81,24 +101,28 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
 
   // Load messages when chat is selected and mark as read
   useEffect(() => {
-    if (state.selectedChatId) {
-      const chatId = state.selectedChatId;
-      telegramService.getMessages(chatId).then((messages) => {
-        dispatch({
-          type: "SET_MESSAGES",
-          payload: { chatId, messages },
-        });
-        // Mark messages as read and clear unread count
-        if (messages.length > 0) {
-          const lastMessageId = messages[messages.length - 1]!.id;
-          telegramService.markAsRead(chatId, lastMessageId).then((success) => {
-            if (success) {
-              dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
-            }
-          });
-        }
+    if (!state.selectedChatId) return;
+
+    const chatId = state.selectedChatId;
+    const loadMessages = async () => {
+      const messages = await telegramService.getMessages(chatId);
+      dispatch({
+        type: "SET_MESSAGES",
+        payload: { chatId, messages },
       });
-    }
+
+      // Mark as read in parallel (fire-and-forget, doesn't block UI)
+      if (messages.length > 0) {
+        const lastMessageId = messages.at(-1)!.id;
+        telegramService.markAsRead(chatId, lastMessageId).then((success) => {
+          if (success) {
+            dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
+          }
+        });
+      }
+    };
+
+    loadMessages();
   }, [state.selectedChatId, telegramService, dispatch]);
 
   // Focus media panel when it opens
@@ -240,25 +264,39 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
     [state.messages, state.selectedChatId]
   );
 
-  // Reset message index to last message when chat changes, messages first load, or new message added
+  // Reset message index to last message when chat changes or messages load
+  // Track message counts per-chat to handle switching between chats correctly
   const prevChatIdRef = React.useRef<string | null>(null);
-  const prevMessageCountRef = React.useRef<number>(0);
+  const messageCounts = React.useRef<Record<string, number>>({});
   useEffect(() => {
-    const chatChanged = state.selectedChatId !== prevChatIdRef.current;
-    const messagesFirstLoaded = prevMessageCountRef.current === 0 && currentMessages.length > 0;
-    // New message added (count increased by 1, not a prepend of many)
-    const newMessageAdded = currentMessages.length === prevMessageCountRef.current + 1;
+    const chatId = state.selectedChatId;
+    const chatChanged = chatId !== prevChatIdRef.current;
+    const prevCount = chatId ? messageCounts.current[chatId] ?? 0 : 0;
+    const currentCount = currentMessages.length;
+    const isLoadingOlder = chatId ? state.loadingOlderMessages[chatId] ?? false : false;
 
-    if (chatChanged || messagesFirstLoaded || newMessageAdded) {
-      prevChatIdRef.current = state.selectedChatId;
-      if (currentMessages.length > 0) {
-        setMessageIndex(currentMessages.length - 1);
+    // Scroll to bottom on: chat switch, messages loaded/replaced, or new message added
+    // BUT NOT when loading older messages (PREPEND_MESSAGES adjusts index separately)
+    const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
+    const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
+    const newMessageAdded = currentCount === prevCount + 1;
+
+    if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || newMessageAdded) {
+      prevChatIdRef.current = chatId;
+      if (currentCount > 0) {
+        setMessageIndex(currentCount - 1);
       } else {
         setMessageIndex(0);
       }
+    } else if (messageIndex >= currentCount && currentCount > 0) {
+      // Clamp index if out of bounds
+      setMessageIndex(currentCount - 1);
     }
-    prevMessageCountRef.current = currentMessages.length;
-  }, [state.selectedChatId, currentMessages.length]);
+
+    if (chatId) {
+      messageCounts.current[chatId] = currentCount;
+    }
+  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {
@@ -358,15 +396,15 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
               messageLayout={state.messageLayout}
               isGroupChat={selectedChat?.isGroup ?? false}
               chatId={state.selectedChatId}
-              sendReaction={telegramService.sendReaction.bind(telegramService)}
-              removeReaction={telegramService.removeReaction.bind(telegramService)}
+              sendReaction={sendReaction}
+              removeReaction={removeReaction}
             />
             {state.mediaPanel.isOpen && mediaPanelMessage && (
               <MediaPanel
                 message={mediaPanelMessage}
                 panelWidth={mediaPanelWidth}
                 panelHeight={panelHeight}
-                downloadMedia={telegramService.downloadMedia.bind(telegramService)}
+                downloadMedia={downloadMedia}
                 onClose={handleCloseMediaPanel}
                 isFocused={isMediaPanelFocused}
               />
@@ -396,7 +434,6 @@ export function App({ useMock = false }: AppProps) {
   const [telegramService, setTelegramService] = useState<TelegramService | null>(null);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
-  const [_isReturningUser, setIsReturningUser] = useState(false);
   const [userName, setUserName] = useState("");
 
   useEffect(() => {
@@ -404,8 +441,6 @@ export function App({ useMock = false }: AppProps) {
       const loadedConfig = loadConfigWithEnvOverrides();
       if (loadedConfig && loadedConfig.apiId && loadedConfig.apiHash) {
         setConfig(loadedConfig);
-        // Check if session exists (returning user)
-        setIsReturningUser(sessionExists());
         setIsSetupComplete(true);
       }
     }
@@ -477,7 +512,6 @@ export function App({ useMock = false }: AppProps) {
       setTelegramService(null);
       setShowWelcome(false);
       setUserName("");
-      setIsReturningUser(false);
       // Re-trigger setup but skip to auth step
       setIsSetupComplete(false);
     } else {
@@ -487,7 +521,6 @@ export function App({ useMock = false }: AppProps) {
       setTelegramService(null);
       setShowWelcome(false);
       setUserName("");
-      setIsReturningUser(false);
       setIsSetupComplete(false);
     }
   }, [telegramService]);
@@ -510,8 +543,10 @@ export function App({ useMock = false }: AppProps) {
   }
 
   return (
-    <AppProvider telegramService={telegramService}>
-      <MainApp telegramService={telegramService} onLogout={handleLogout} />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider telegramService={telegramService}>
+        <MainApp telegramService={telegramService} onLogout={handleLogout} />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

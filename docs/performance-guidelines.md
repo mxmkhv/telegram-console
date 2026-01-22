@@ -14,7 +14,7 @@ Unlike the DOM, the terminal is a serial output stream.
 
 **Flicker happens when:**
 
-- You write to `stdout` faster than the terminal emulator can repaint.
+- You write to `stdout` faster than the terminal emulator can repaint. Beware of that!
 - The layout calculation takes too long, causing a delay between the "clear screen" command and the "draw new content" command.
 
 ---

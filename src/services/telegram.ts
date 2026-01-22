@@ -3,6 +3,22 @@ import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent } from "telegram/events";
 import type { TelegramService, ConnectionState, Message, MediaAttachment } from "../types";
 
+// Type for sender objects from GramJS (User, Chat, or Channel)
+interface GramJSSender {
+  firstName?: string;
+  lastName?: string;
+  title?: string;
+  username?: string;
+}
+
+function formatSenderName(sender: GramJSSender | undefined): string {
+  if (!sender) return "Unknown";
+  if (sender.firstName) {
+    return `${sender.firstName}${sender.lastName ? ` ${sender.lastName}` : ""}`;
+  }
+  return sender.title ?? sender.username ?? "Unknown";
+}
+
 function extractMedia(msg: Api.Message): MediaAttachment | undefined {
   const { media } = msg;
   if (!media) return undefined;
@@ -109,7 +125,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
       setConnectionState("connecting");
       await client.connect();
       setConnectionState("connected");
-      onSessionUpdate?.(client.session.save() as unknown as string);
+      onSessionUpdate?.(String(client.session.save()));
 
       // Only add event handler once to prevent duplicate message dispatches
       if (!eventHandlerAdded) {
@@ -118,14 +134,11 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           async (event: NewMessageEvent) => {
             const msg = event.message;
             const chatId = msg.chatId?.toString() ?? "";
-            const sender = await msg.getSender() as { firstName?: string; lastName?: string; title?: string; username?: string } | undefined;
-            const senderName = sender?.firstName
-              ? `${sender.firstName}${sender.lastName ? ` ${sender.lastName}` : ""}`
-              : sender?.title ?? sender?.username ?? "Unknown";
+            const sender = (await msg.getSender()) as GramJSSender | undefined;
             const message: Message = {
               id: msg.id,
               senderId: msg.senderId?.toString() ?? "",
-              senderName,
+              senderName: formatSenderName(sender),
               text: msg.text ?? "",
               timestamp: new Date(msg.date * 1000),
               isOutgoing: msg.out ?? false,
@@ -163,22 +176,16 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
     async getMessages(chatId: string, limit = 50, offsetId?: number) {
       const messages = await client.getMessages(chatId, { limit, offsetId });
       // Reverse to get chronological order (oldest first)
-      return messages.map((m) => {
-        const sender = m.sender as { firstName?: string; lastName?: string; title?: string; username?: string } | undefined;
-        const senderName = sender?.firstName
-          ? `${sender.firstName}${sender.lastName ? ` ${sender.lastName}` : ""}`
-          : sender?.title ?? sender?.username ?? "Unknown";
-        return {
-          id: m.id,
-          senderId: m.senderId?.toString() ?? "",
-          senderName,
-          text: m.message ?? "",
-          timestamp: new Date(m.date * 1000),
-          isOutgoing: m.out ?? false,
-          media: extractMedia(m),
-          reactions: extractReactions(m),
-        };
-      }).reverse();
+      return messages.map((m) => ({
+        id: m.id,
+        senderId: m.senderId?.toString() ?? "",
+        senderName: formatSenderName(m.sender as GramJSSender | undefined),
+        text: m.message ?? "",
+        timestamp: new Date(m.date * 1000),
+        isOutgoing: m.out ?? false,
+        media: extractMedia(m),
+        reactions: extractReactions(m),
+      })).reverse();
     },
 
     async sendMessage(chatId: string, text: string) {

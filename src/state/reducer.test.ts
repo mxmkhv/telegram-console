@@ -45,6 +45,83 @@ describe("appReducer", () => {
     expect(state.messages["1"]).toContain(message);
   });
 
+  it("ADD_MESSAGE updates chat lastMessage and unreadCount for non-selected chat", () => {
+    // Setup: two chats, chat "2" is selected
+    const stateWithChats = appReducer(initialState, {
+      type: "SET_CHATS",
+      payload: [
+        { id: "1", title: "Chat One", unreadCount: 0, isGroup: false },
+        { id: "2", title: "Chat Two", unreadCount: 0, isGroup: false },
+      ],
+    });
+    const stateWithSelection = appReducer(stateWithChats, {
+      type: "SELECT_CHAT",
+      payload: "2",
+    });
+
+    // New message arrives in chat "1" (not selected)
+    const message = { id: 1, senderId: "1", senderName: "Test", text: "Hello", timestamp: new Date(), isOutgoing: false };
+    const state = appReducer(stateWithSelection, {
+      type: "ADD_MESSAGE",
+      payload: { chatId: "1", message },
+    });
+
+    // Chat 1 should have updated lastMessage and incremented unreadCount
+    const chat1 = state.chats.find(c => c.id === "1");
+    expect(chat1?.lastMessage).toEqual(message);
+    expect(chat1?.unreadCount).toBe(1);
+
+    // Chat 2 (selected) should be unchanged
+    const chat2 = state.chats.find(c => c.id === "2");
+    expect(chat2?.unreadCount).toBe(0);
+  });
+
+  it("ADD_MESSAGE does NOT increment unreadCount for selected chat", () => {
+    const stateWithChats = appReducer(initialState, {
+      type: "SET_CHATS",
+      payload: [{ id: "1", title: "Chat One", unreadCount: 0, isGroup: false }],
+    });
+    const stateWithSelection = appReducer(stateWithChats, {
+      type: "SELECT_CHAT",
+      payload: "1",
+    });
+
+    // New message arrives in the SELECTED chat
+    const message = { id: 1, senderId: "1", senderName: "Test", text: "Hello", timestamp: new Date(), isOutgoing: false };
+    const state = appReducer(stateWithSelection, {
+      type: "ADD_MESSAGE",
+      payload: { chatId: "1", message },
+    });
+
+    // Chat should have lastMessage but unreadCount should stay 0
+    const chat = state.chats.find(c => c.id === "1");
+    expect(chat?.lastMessage).toEqual(message);
+    expect(chat?.unreadCount).toBe(0);
+  });
+
+  it("ADD_MESSAGE moves chat to top of list", () => {
+    const stateWithChats = appReducer(initialState, {
+      type: "SET_CHATS",
+      payload: [
+        { id: "1", title: "Chat One", unreadCount: 0, isGroup: false },
+        { id: "2", title: "Chat Two", unreadCount: 0, isGroup: false },
+        { id: "3", title: "Chat Three", unreadCount: 0, isGroup: false },
+      ],
+    });
+
+    // New message arrives in chat "3" (last in list)
+    const message = { id: 1, senderId: "3", senderName: "Test", text: "Hello", timestamp: new Date(), isOutgoing: false };
+    const state = appReducer(stateWithChats, {
+      type: "ADD_MESSAGE",
+      payload: { chatId: "3", message },
+    });
+
+    // Chat 3 should now be first
+    expect(state.chats[0]?.id).toBe("3");
+    expect(state.chats[1]?.id).toBe("1");
+    expect(state.chats[2]?.id).toBe("2");
+  });
+
   it("sets focused panel", () => {
     const state = appReducer(initialState, {
       type: "SET_FOCUSED_PANEL",
