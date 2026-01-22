@@ -8,7 +8,6 @@ import {
 import { join } from "path";
 import { homedir } from "os";
 import type { AppConfig, MessageLayout } from "../types";
-import type { AppConfig, MessageLayout } from "../types";
 
 const CONFIG_FILENAME = "config.json";
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "telegram-console");
@@ -30,13 +29,6 @@ export function loadConfig(customDir?: string): AppConfig | null {
   if (!existsSync(path)) return null;
 
   const content = readFileSync(path, "utf-8");
-  const config = JSON.parse(content) as Partial<AppConfig>;
-
-  // Provide default for messageLayout if missing (backwards compatibility)
-  return {
-    ...config,
-    messageLayout: config.messageLayout ?? "classic",
-  } as AppConfig;
   const config = JSON.parse(content) as Partial<AppConfig>;
 
   // Provide default for messageLayout if missing (backwards compatibility)
