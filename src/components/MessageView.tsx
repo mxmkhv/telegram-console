@@ -134,14 +134,14 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
 
   if (!selectedChatTitle) {
     return (
-      <Box flexDirection="column" borderStyle="single" borderColor={isFocused ? "cyan" : undefined} width={width} height={VISIBLE_LINES + 3} justifyContent="center" alignItems="center">
+      <Box flexDirection="column" borderStyle="round" borderColor={isFocused ? "cyan" : "blue"} width={width} height={VISIBLE_LINES + 3} justifyContent="center" alignItems="center">
         <Text dimColor>Select a chat to start</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={isFocused ? "cyan" : undefined} width={width} height={VISIBLE_LINES + 3}>
+    <Box flexDirection="column" borderStyle="round" borderColor={isFocused ? "cyan" : "blue"} width={width} height={VISIBLE_LINES + 3}>
       <Box paddingX={1} borderStyle="single" borderBottom borderLeft={false} borderRight={false} borderTop={false}>
         <Text bold color={isFocused ? "cyan" : undefined}>{selectedChatTitle}</Text>
         {totalLines > VISIBLE_LINES && (
