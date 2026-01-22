@@ -96,17 +96,23 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         },
       };
 
-    case "ADD_MESSAGE":
+    case "ADD_MESSAGE": {
+      const existingMessages = state.messages[action.payload.chatId] ?? [];
+      // Deduplicate: only add if message ID doesn't already exist
+      if (existingMessages.some(m => m.id === action.payload.message.id)) {
+        return state;
+      }
       return {
         ...state,
         messages: {
           ...state.messages,
           [action.payload.chatId]: [
-            ...(state.messages[action.payload.chatId] ?? []),
+            ...existingMessages,
             action.payload.message,
           ],
         },
       };
+    }
 
     case "PREPEND_MESSAGES":
       return {

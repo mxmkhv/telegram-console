@@ -77,6 +77,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
   let connectionState: ConnectionState = "disconnected";
   let connectionCallback: ((state: ConnectionState) => void) | null = null;
   let _messageCallback: ((message: Message, chatId: string) => void) | null = null;
+  let eventHandlerAdded = false;
 
   function setConnectionState(state: ConnectionState) {
     connectionState = state;
@@ -92,27 +93,31 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
       setConnectionState("connected");
       onSessionUpdate?.(client.session.save() as unknown as string);
 
-      client.addEventHandler(
-        async (event: NewMessageEvent) => {
-          const msg = event.message;
-          const chatId = msg.chatId?.toString() ?? "";
-          const sender = await msg.getSender() as { firstName?: string; lastName?: string; title?: string; username?: string } | undefined;
-          const senderName = sender?.firstName
-            ? `${sender.firstName}${sender.lastName ? ` ${sender.lastName}` : ""}`
-            : sender?.title ?? sender?.username ?? "Unknown";
-          const message: Message = {
-            id: msg.id,
-            senderId: msg.senderId?.toString() ?? "",
-            senderName,
-            text: msg.text ?? "",
-            timestamp: new Date(msg.date * 1000),
-            isOutgoing: msg.out ?? false,
-            media: extractMedia(msg),
-          };
-          _messageCallback?.(message, chatId);
-        },
-        new NewMessage({})
-      );
+      // Only add event handler once to prevent duplicate message dispatches
+      if (!eventHandlerAdded) {
+        eventHandlerAdded = true;
+        client.addEventHandler(
+          async (event: NewMessageEvent) => {
+            const msg = event.message;
+            const chatId = msg.chatId?.toString() ?? "";
+            const sender = await msg.getSender() as { firstName?: string; lastName?: string; title?: string; username?: string } | undefined;
+            const senderName = sender?.firstName
+              ? `${sender.firstName}${sender.lastName ? ` ${sender.lastName}` : ""}`
+              : sender?.title ?? sender?.username ?? "Unknown";
+            const message: Message = {
+              id: msg.id,
+              senderId: msg.senderId?.toString() ?? "",
+              senderName,
+              text: msg.text ?? "",
+              timestamp: new Date(msg.date * 1000),
+              isOutgoing: msg.out ?? false,
+              media: extractMedia(msg),
+            };
+            _messageCallback?.(message, chatId);
+          },
+          new NewMessage({})
+        );
+      }
     },
 
     async disconnect() {

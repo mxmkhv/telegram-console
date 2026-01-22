@@ -1,9 +1,9 @@
-import { memo, useMemo, useCallback } from "react";
+import { memo, useMemo, useCallback, type Dispatch } from "react";
 import { Box, Text, useInput } from "ink";
-import type { Message } from "../types";
+import type { Message, TelegramService } from "../types";
 import { MediaPlaceholder } from './MediaPlaceholder.js';
 import { MediaPreview } from './MediaPreview.js';
-import { useTelegramService, useAppDispatch } from '../state/context.js';
+import type { AppAction } from '../state/reducer.js';
 
 const VISIBLE_LINES = 20;
 
@@ -15,6 +15,8 @@ interface MessageViewProps {
   isLoadingOlder?: boolean;
   canLoadOlder?: boolean;
   width: number;
+  dispatch: Dispatch<AppAction>;
+  telegramService: TelegramService | null;
 }
 
 function formatTime(date: Date): string {
@@ -36,9 +38,7 @@ function getMessageLineCount(msg: Message, isSelected: boolean): number {
   return lines;
 }
 
-function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width }: MessageViewProps) {
-  const telegramService = useTelegramService();
-  const dispatch = useAppDispatch();
+function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, telegramService }: MessageViewProps) {
 
   const downloadMedia = useCallback((message: Message) => {
     if (!telegramService) return Promise.resolve(undefined);

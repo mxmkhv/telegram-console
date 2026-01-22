@@ -344,6 +344,8 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
               isLoadingOlder={isLoadingOlder}
               canLoadOlder={canLoadOlder}
               width={messageViewWidth}
+              dispatch={dispatch}
+              telegramService={telegramService}
             />
             {state.mediaPanel.isOpen && mediaPanelMessage && (
               <MediaPanel
