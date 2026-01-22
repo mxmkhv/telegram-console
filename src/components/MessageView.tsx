@@ -19,6 +19,9 @@ interface MessageViewProps {
   dispatch: Dispatch<AppAction>;
   messageLayout: MessageLayout;
   isGroupChat: boolean;
+  chatId: string | null;
+  sendReaction: (chatId: string, messageId: number, emoji: string) => Promise<boolean>;
+  removeReaction: (chatId: string, messageId: number) => Promise<boolean>;
 }
 
 function formatTime(date: Date): string {
@@ -64,7 +67,7 @@ const SENDER_COLORS = [
   "redBright",
 ] as const;
 
-function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, messageLayout, isGroupChat }: MessageViewProps) {
+function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages, selectedIndex, isLoadingOlder = false, canLoadOlder = false, width, dispatch, messageLayout, isGroupChat, chatId, sendReaction, removeReaction }: MessageViewProps) {
   // Reaction picker state
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [reactionPickerIndex, setReactionPickerIndex] = useState(0);
@@ -109,23 +112,73 @@ function MessageViewInner({ isFocused, selectedChatTitle, messages: chatMessages
   );
 
   // Reaction handlers
-  const handleSendReaction = useCallback((emoji: string) => {
+  const handleSendReaction = useCallback(async (emoji: string) => {
     const messageId = chatMessages[selectedIndex]?.id;
-    if (!messageId) return;
+    if (!messageId || !chatId) return;
 
     setReactionPickerOpen(false);
     setReactionModalOpen(false);
 
-    // Optimistic update will be done in Task 9
-    // For now just show the flash
+    // Optimistic update
+    dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji } });
+
+    // Flash green
     setFlashState({ messageId, color: "green" });
     setTimeout(() => setFlashState(null), 200);
-  }, [chatMessages, selectedIndex]);
 
-  const handleRemoveReaction = useCallback((messageId: number) => {
+    // API call with retry
+    let success = await sendReaction(chatId, messageId, emoji);
+    if (!success) {
+      success = await sendReaction(chatId, messageId, emoji);
+    }
+
+    if (!success) {
+      // Revert and flash red twice
+      dispatch({ type: "REMOVE_REACTION", payload: { chatId, messageId } });
+      setFlashState({ messageId, color: "red" });
+      setTimeout(() => {
+        setFlashState(null);
+        setTimeout(() => {
+          setFlashState({ messageId, color: "red" });
+          setTimeout(() => setFlashState(null), 200);
+        }, 100);
+      }, 200);
+    }
+  }, [chatMessages, selectedIndex, chatId, dispatch, sendReaction]);
+
+  const handleRemoveReaction = useCallback(async (messageId: number) => {
+    if (!chatId) return;
+
+    // Store current reaction for potential revert
+    const msg = chatMessages.find((m) => m.id === messageId);
+    const userReaction = msg?.reactions?.find((r) => r.hasUserReacted);
+
+    // Optimistic update
+    dispatch({ type: "REMOVE_REACTION", payload: { chatId, messageId } });
+
+    // Flash yellow
     setFlashState({ messageId, color: "yellow" });
     setTimeout(() => setFlashState(null), 200);
-  }, []);
+
+    // API call with retry
+    let success = await removeReaction(chatId, messageId);
+    if (!success) {
+      success = await removeReaction(chatId, messageId);
+    }
+
+    if (!success && userReaction) {
+      // Revert and flash red twice
+      dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji: userReaction.emoji } });
+      setFlashState({ messageId, color: "red" });
+      setTimeout(() => {
+        setFlashState(null);
+        setTimeout(() => {
+          setFlashState({ messageId, color: "red" });
+          setTimeout(() => setFlashState(null), 200);
+        }, 100);
+      }, 200);
+    }
+  }, [chatId, chatMessages, dispatch, removeReaction]);
 
   // Build color map: assign colors to senders in order of first appearance
   const senderColorMap = useMemo(() => {

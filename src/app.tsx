@@ -357,6 +357,9 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
               dispatch={dispatch}
               messageLayout={state.messageLayout}
               isGroupChat={selectedChat?.isGroup ?? false}
+              chatId={state.selectedChatId}
+              sendReaction={telegramService.sendReaction.bind(telegramService)}
+              removeReaction={telegramService.removeReaction.bind(telegramService)}
             />
             {state.mediaPanel.isOpen && mediaPanelMessage && (
               <MediaPanel

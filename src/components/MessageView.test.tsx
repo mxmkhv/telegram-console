@@ -33,6 +33,8 @@ const mockMessages: Message[] = [
 ];
 
 const mockDispatch = () => {};
+const mockSendReaction = async (_chatId: string, _messageId: number, _emoji: string) => true;
+const mockRemoveReaction = async (_chatId: string, _messageId: number) => true;
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<AppProvider>{ui}</AppProvider>);
@@ -48,6 +50,11 @@ describe("MessageView", () => {
         selectedIndex={0}
         width={50}
         dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId={null}
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -62,6 +69,11 @@ describe("MessageView", () => {
         selectedIndex={0}
         width={50}
         dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId={null}
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -76,6 +88,11 @@ describe("MessageView", () => {
         selectedIndex={0}
         width={50}
         dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="chat1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -90,6 +107,11 @@ describe("MessageView", () => {
         selectedIndex={1}
         width={50}
         dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="chat1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -104,6 +126,11 @@ describe("MessageView", () => {
         selectedIndex={1}
         width={50}
         dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="chat1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
       />
     );
     // Snapshot will capture the styling including cyan color for "You"
