@@ -35,7 +35,7 @@ function StatusBarInner({ connectionState, focusedPanel }: StatusBarProps) {
       case "header":
         return "[←→: Select] [Enter: Activate] [Tab: Next]";
       case "chatList":
-        return "[↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back]";
+        return "[R: React] [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back]";
       case "messages":
         return "[R: React] [←: Chats] [Enter: Type] [Tab: Next] [Esc: Back]";
       case "input":
@@ -48,9 +48,14 @@ function StatusBarInner({ connectionState, focusedPanel }: StatusBarProps) {
   return (
     <Box borderStyle="round" paddingX={1} justifyContent="space-between">
       <Text>
-        [<Text color={getStatusColor(connectionState)}>{getStatusText(connectionState)}</Text>]
-        {" "}
-        <Text bold color="cyan">{focusedPanel.toUpperCase()}</Text>
+        [
+        <Text color={getStatusColor(connectionState)}>
+          {getStatusText(connectionState)}
+        </Text>
+        ]{" "}
+        <Text bold color="cyan">
+          {focusedPanel.toUpperCase()}
+        </Text>
       </Text>
       <Text dimColor>{getHints()}</Text>
     </Box>
