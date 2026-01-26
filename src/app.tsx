@@ -277,11 +277,15 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
 
     // Scroll to bottom on: chat switch, messages loaded/replaced, or new message added
     // BUT NOT when loading older messages (PREPEND_MESSAGES adjusts index separately)
+    // AND NOT when user has scrolled up (preserve their position)
     const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
     const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
     const newMessageAdded = currentCount === prevCount + 1;
+    // Only auto-scroll to new message if user was already at the bottom
+    const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
+    const shouldScrollToNew = newMessageAdded && wasAtBottom;
 
-    if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || newMessageAdded) {
+    if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
       prevChatIdRef.current = chatId;
       if (currentCount > 0) {
         setMessageIndex(currentCount - 1);

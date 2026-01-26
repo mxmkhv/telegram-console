@@ -114,9 +114,9 @@ function InputBarInner({ isFocused, onSubmit, selectedChatId }: InputBarProps) {
           <Text dimColor>{placeholder}</Text>
         ) : (
           <Text>
-            {beforeCursor}
-            {isFocused ? <Text inverse>{atCursor}</Text> : atCursor}
-            {afterCursor}
+            <Text>{beforeCursor}</Text>
+            <Text inverse={isFocused}>{atCursor}</Text>
+            <Text>{afterCursor}</Text>
           </Text>
         )}
       </Box>
