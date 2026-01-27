@@ -26,8 +26,16 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
   const { state, dispatch } = useApp();
   const { exit } = useInkApp();
   const { stdout } = useStdout();
-  const [chatIndex, setChatIndex] = useState(0);
+  // Track highlighted chat by ID (not index) so it follows when chats reorder
+  const [highlightedChatId, setHighlightedChatId] = useState<string | null>(null);
   const [messageIndex, setMessageIndex] = useState(0);
+
+  // Derive chatIndex from ID - automatically updates when chats reorder
+  const chatIndex = useMemo(() => {
+    if (!highlightedChatId || state.chats.length === 0) return 0;
+    const index = state.chats.findIndex((c) => c.id === highlightedChatId);
+    return index >= 0 ? index : 0;
+  }, [highlightedChatId, state.chats]);
 
   const handleHeaderActivate = useCallback(
     (button: "settings" | "logout") => {
@@ -214,9 +222,13 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
       // Panel-specific navigation
       if (state.focusedPanel === "chatList") {
         if (key.upArrow) {
-          setChatIndex((i) => Math.max(0, i - 1));
+          const newIndex = Math.max(0, chatIndex - 1);
+          const newChat = state.chats[newIndex];
+          if (newChat) setHighlightedChatId(newChat.id);
         } else if (key.downArrow) {
-          setChatIndex((i) => Math.min(state.chats.length - 1, i + 1));
+          const newIndex = Math.min(state.chats.length - 1, chatIndex + 1);
+          const newChat = state.chats[newIndex];
+          if (newChat) setHighlightedChatId(newChat.id);
         } else if (key.return) {
           const chat = state.chats[chatIndex];
           if (chat) handleSelectChat(chat.id);
@@ -277,11 +289,15 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
 
     // Scroll to bottom on: chat switch, messages loaded/replaced, or new message added
     // BUT NOT when loading older messages (PREPEND_MESSAGES adjusts index separately)
+    // AND NOT when user has scrolled up (preserve their position)
     const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
     const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
     const newMessageAdded = currentCount === prevCount + 1;
+    // Only auto-scroll to new message if user was already at the bottom
+    const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
+    const shouldScrollToNew = newMessageAdded && wasAtBottom;
 
-    if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || newMessageAdded) {
+    if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
       prevChatIdRef.current = chatId;
       if (currentCount > 0) {
         setMessageIndex(currentCount - 1);

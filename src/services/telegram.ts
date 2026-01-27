@@ -86,7 +86,8 @@ function extractReactions(msg: Api.Message): Message["reactions"] {
     .map((r) => ({
       emoji: r.reaction.emoticon,
       count: r.count,
-      hasUserReacted: r.chosenOrder !== undefined,
+      // chosenOrder is null when user hasn't reacted, number when they have
+      hasUserReacted: r.chosenOrder != null,
     }));
 }
 
@@ -239,7 +240,6 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
             peer: chatId,
             msgId: messageId,
             reaction: [new Api.ReactionEmoji({ emoticon: emoji })],
-            addToRecent: true,
           })
         );
         return true;

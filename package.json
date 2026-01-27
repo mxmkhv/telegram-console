@@ -1,6 +1,6 @@
 {
   "name": "telegram-console",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "description": "A terminal-based Telegram client",
   "author": "Max Kehayov",
@@ -38,7 +38,13 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "version:patch": "npm version patch",
+    "version:minor": "npm version minor",
+    "version:major": "npm version major",
+    "release:patch": "npm version patch && npm publish",
+    "release:minor": "npm version minor && npm publish",
+    "release:major": "npm version major && npm publish"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

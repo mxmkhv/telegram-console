@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Box, Text, useInput } from "ink";
 
-export const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉"] as const;
+export const QUICK_EMOJIS = ["👍", "❤️", "🤣", "😮", "😢", "🔥"] as const;
 
 interface ReactionPickerProps {
   emojis: readonly string[];
