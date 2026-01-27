@@ -293,15 +293,20 @@ function MessageViewInner({
     // Calculate available lines (reserve space for potential indicators)
     const availableLines = VISIBLE_LINES;
 
+    // Check if we're at the last message (no bottom indicator needed)
+    const atLastMessage = selectedIndex === total - 1;
+
     // First pass: expand backwards
     while (start > 0) {
       const prevLines = messageLineCounts[start - 1]!;
       const wouldNeedTopIndicator = start - 1 > 0;
       const neededReserve = wouldNeedTopIndicator ? reserveTop : 0;
+      // Only reserve bottom space if we're not at the last message
+      const bottomReserve = atLastMessage ? 0 : reserveBottom;
 
       if (
         linesUsed + prevLines + neededReserve <=
-        availableLines - reserveBottom
+        availableLines - bottomReserve
       ) {
         start--;
         linesUsed += prevLines;
