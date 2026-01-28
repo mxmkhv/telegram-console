@@ -200,7 +200,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
       })).reverse();
     },
 
-    async sendMessage(chatId: string, text: string, replyToMsgId?: number) {
+    async sendMessage(chatId: string, text: string, replyToMsgId?: number, replyToSenderName?: string) {
       const result = await client.sendMessage(chatId, {
         message: text,
         ...(replyToMsgId && { replyTo: replyToMsgId }),
@@ -213,6 +213,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         timestamp: new Date(),
         isOutgoing: true,
         replyToMsgId,
+        replyToSenderName,
       };
     },
 

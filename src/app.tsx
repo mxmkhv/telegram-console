@@ -151,7 +151,8 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
   const handleSendMessage = useCallback(
     async (text: string, chatId: string) => {
       const replyToMsgId = state.replyingToMessage?.id;
-      const message = await telegramService.sendMessage(chatId, text, replyToMsgId);
+      const replyToSenderName = state.replyingToMessage?.senderName;
+      const message = await telegramService.sendMessage(chatId, text, replyToMsgId, replyToSenderName);
       dispatch({
         type: "ADD_MESSAGE",
         payload: { chatId, message },
