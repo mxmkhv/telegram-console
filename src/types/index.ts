@@ -56,6 +56,8 @@ export interface Message {
   isOutgoing: boolean;
   media?: MediaAttachment;
   reactions?: MessageReaction[];
+  replyToMsgId?: number;        // ID of message this replies to
+  replyToSenderName?: string;   // Sender name for display
 }
 
 export interface TelegramService {
@@ -64,7 +66,8 @@ export interface TelegramService {
   getConnectionState(): ConnectionState;
   getChats(): Promise<Chat[]>;
   getMessages(chatId: string, limit?: number, offsetId?: number): Promise<Message[]>;
-  sendMessage(chatId: string, text: string): Promise<Message>;
+  sendMessage(chatId: string, text: string, replyToMsgId?: number): Promise<Message>;
+  editMessage(chatId: string, messageId: number, newText: string): Promise<Message>;
   markAsRead(chatId: string, maxMessageId?: number): Promise<boolean>;
   sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean>;
   removeReaction(chatId: string, messageId: number): Promise<boolean>;
