@@ -139,11 +139,21 @@ function MessageViewInner({
     }
   }, [isAtBottom, chatId, dispatch]);
 
-  // Handle 'r' key for reactions and Enter for media panel
+  // Handle 'r' key for reactions, 'R' (Shift+R) for reply, and Enter for media panel
   useInput(
     (input, key) => {
-      // 'r' key for reactions
-      if (input === "r" || input === "R") {
+      // Shift+R for reply (uppercase R)
+      if (input === "R") {
+        const selectedMessage = chatMessages[selectedIndex];
+        if (selectedMessage) {
+          dispatch({ type: "SET_REPLYING_TO", payload: selectedMessage });
+          dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
+        }
+        return;
+      }
+
+      // 'r' key for reactions (lowercase only now)
+      if (input === "r") {
         const selectedMessage = chatMessages[selectedIndex];
         if (selectedMessage) {
           if (hasUserReaction(selectedMessage.reactions)) {
