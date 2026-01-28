@@ -53,7 +53,7 @@ telegram-console
 ```
 
 <p align="center">
-  <img src="screenshot.png" alt="Screenshot" width="800">
+  <img src="screenshot_donald.png" alt="Screenshot" width="800">
 </p>
 
 ### Keyboard Shortcuts
