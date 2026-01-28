@@ -150,14 +150,42 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
 
   const handleSendMessage = useCallback(
     async (text: string, chatId: string) => {
-      const message = await telegramService.sendMessage(chatId, text);
+      const replyToMsgId = state.replyingToMessage?.id;
+      const message = await telegramService.sendMessage(chatId, text, replyToMsgId);
       dispatch({
         type: "ADD_MESSAGE",
         payload: { chatId, message },
       });
+      // Clear reply state after sending
+      if (replyToMsgId) {
+        dispatch({ type: "SET_REPLYING_TO", payload: null });
+      }
+    },
+    [telegramService, dispatch, state.replyingToMessage]
+  );
+
+  const handleEditMessage = useCallback(
+    async (text: string, chatId: string, messageId: number) => {
+      try {
+        await telegramService.editMessage(chatId, messageId, text);
+        dispatch({
+          type: "UPDATE_MESSAGE",
+          payload: { chatId, messageId, newText: text },
+        });
+      } catch {
+        // Edit failed - could add error flash here
+      }
     },
     [telegramService, dispatch]
   );
+
+  const handleCancelReply = useCallback(() => {
+    dispatch({ type: "SET_REPLYING_TO", payload: null });
+  }, [dispatch]);
+
+  const handleCancelEdit = useCallback(() => {
+    dispatch({ type: "SET_EDITING_MESSAGE", payload: null });
+  }, [dispatch]);
 
   // Panel navigation and global keys (disabled when input is focused to not interfere with TextInput)
   useInput(
@@ -275,6 +303,13 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
     () => (state.selectedChatId ? state.messages[state.selectedChatId] ?? [] : []),
     [state.messages, state.selectedChatId]
   );
+
+  const handleStartEdit = useCallback(() => {
+    const lastOutgoing = [...currentMessages].reverse().find((m) => m.isOutgoing);
+    if (lastOutgoing) {
+      dispatch({ type: "SET_EDITING_MESSAGE", payload: lastOutgoing });
+    }
+  }, [currentMessages, dispatch]);
 
   // Reset message index to last message when chat changes or messages load
   // Track message counts per-chat to handle switching between chats correctly
@@ -405,6 +440,7 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
               selectedChatTitle={selectedChat?.title ?? null}
               messages={currentMessages}
               selectedIndex={messageIndex}
+              setSelectedIndex={setMessageIndex}
               isLoadingOlder={isLoadingOlder}
               canLoadOlder={canLoadOlder}
               width={messageViewWidth}
@@ -429,7 +465,13 @@ function MainApp({ telegramService, onLogout }: MainAppProps) {
           <InputBar
             isFocused={isInputFocused}
             onSubmit={handleSendMessage}
+            onEdit={handleEditMessage}
+            onStartEdit={handleStartEdit}
             selectedChatId={state.selectedChatId}
+            replyingToMessage={state.replyingToMessage}
+            editingMessage={state.editingMessage}
+            onCancelReply={handleCancelReply}
+            onCancelEdit={handleCancelEdit}
           />
         </>
       )}
