@@ -433,6 +433,11 @@ function MessageViewInner({
           <Text color={senderColor}>{msg.senderName || "Unknown"}</Text>
         )}
 
+        {/* Reply prefix */}
+        {msg.replyToMsgId && (
+          <Text dimColor>↩ {msg.replyToSenderName ?? "Unknown"}</Text>
+        )}
+
         {/* Message content with inline timestamp on last line */}
         {textLines.map((line, lineIndex) => {
           const isLastLine = lineIndex === textLines.length - 1;
@@ -602,6 +607,12 @@ function MessageViewInner({
                             <Text inverse={isSelected} dimColor={!isSelected}>
                               [{formatTime(msg.timestamp)}]{"\u00A0"}
                             </Text>
+                            {/* Reply prefix */}
+                            {msg.replyToMsgId && (
+                              <Text inverse={isSelected} dimColor>
+                                ↩{msg.replyToSenderName ?? "Unknown"}:{"\u00A0"}
+                              </Text>
+                            )}
                             <Text
                               inverse={isSelected}
                               bold
