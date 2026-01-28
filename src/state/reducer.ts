@@ -39,6 +39,7 @@ export type AppAction =
   | { type: "PREPEND_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "SET_FOCUSED_PANEL"; payload: AppState["focusedPanel"] }
   | { type: "UPDATE_UNREAD_COUNT"; payload: { chatId: string; count: number } }
+  | { type: "INCREMENT_UNREAD"; payload: { chatId: string } }
   | { type: "SET_LOADING_OLDER_MESSAGES"; payload: { chatId: string; loading: boolean } }
   | { type: "SET_HAS_MORE_MESSAGES"; payload: { chatId: string; hasMore: boolean } }
   | { type: "SET_CURRENT_VIEW"; payload: CurrentView }
@@ -180,6 +181,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         chats: state.chats.map((chat) =>
           chat.id === action.payload.chatId
             ? { ...chat, unreadCount: action.payload.count }
+            : chat
+        ),
+      };
+
+    case "INCREMENT_UNREAD":
+      return {
+        ...state,
+        chats: state.chats.map((chat) =>
+          chat.id === action.payload.chatId
+            ? { ...chat, unreadCount: chat.unreadCount + 1 }
             : chat
         ),
       };

@@ -107,11 +107,24 @@ const MOCK_MESSAGES: Record<string, Message[]> = {
   ],
 };
 
+// Drip messages for testing flash notifications
+const DRIP_MESSAGES = [
+  { chatId: "8", senderId: "gpt", senderName: "ChatGPT", text: "Just checking in! How can I help? 😊" },
+  { chatId: "8", senderId: "claude", senderName: "Claude", text: "I noticed some activity. Let me know if you need anything." },
+  { chatId: "8", senderId: "gemini", senderName: "Gemini", text: "Fun fact: I can process images too!" },
+  { chatId: "4", senderId: "elon", senderName: "Elon", text: "Just bought another company. NBD." },
+  { chatId: "4", senderId: "zuck", senderName: "Zuck", text: "The metaverse is the future. Trust me." },
+  { chatId: "1", senderId: "1", senderName: "Elon", text: "Mars colony update: still red." },
+  { chatId: "2", senderId: "2", senderName: "Donald", text: "TREMENDOUS progress on everything. Believe me." },
+];
+
 export function createMockTelegramService(): TelegramService {
   let connectionState: ConnectionState = "disconnected";
   let connectionCallback: ((state: ConnectionState) => void) | null = null;
-  let _messageCallback: ((message: Message, chatId: string) => void) | null = null;
+  const messageCallbacks = new Set<(message: Message, chatId: string) => void>();
   const messages = structuredClone(MOCK_MESSAGES);
+  let dripIndex = 0;
+  let dripInterval: NodeJS.Timeout | null = null;
 
   return {
     async connect() {
@@ -120,9 +133,34 @@ export function createMockTelegramService(): TelegramService {
       await new Promise((r) => setTimeout(r, 100));
       connectionState = "connected";
       connectionCallback?.(connectionState);
+
+      // Start dripping messages every 5 seconds
+      dripInterval = setInterval(() => {
+        if (messageCallbacks.size > 0) {
+          const drip = DRIP_MESSAGES[dripIndex % DRIP_MESSAGES.length]!;
+          const message: Message = {
+            id: Date.now(),
+            senderId: drip.senderId,
+            senderName: drip.senderName,
+            text: drip.text,
+            timestamp: new Date(),
+            isOutgoing: false,
+          };
+          if (!messages[drip.chatId]) {
+            messages[drip.chatId] = [];
+          }
+          messages[drip.chatId]!.push(message);
+          messageCallbacks.forEach((cb) => cb(message, drip.chatId));
+          dripIndex++;
+        }
+      }, 5000);
     },
 
     async disconnect() {
+      if (dripInterval) {
+        clearInterval(dripInterval);
+        dripInterval = null;
+      }
       connectionState = "disconnected";
       connectionCallback?.(connectionState);
     },
@@ -177,11 +215,9 @@ export function createMockTelegramService(): TelegramService {
     },
 
     onNewMessage(callback) {
-      _messageCallback = callback;
+      messageCallbacks.add(callback);
       return () => {
-        if (_messageCallback === callback) {
-          _messageCallback = null;
-        }
+        messageCallbacks.delete(callback);
       };
     },
 

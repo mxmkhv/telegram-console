@@ -1,6 +1,9 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useEffect } from "react";
 import { Box, Text } from "ink";
 import type { Chat } from "../types";
+import { useFlash } from "../hooks/useFlash.js";
+import { useTelegramService } from "../state/context.js";
+import { FLASH_CONFIG } from "../config/flashConfig.js";
 
 // Layout constants
 const LIST_HEIGHT = 18; // Number of chat items to show
@@ -14,10 +17,12 @@ const ChatRow = memo(function ChatRow({
   chat,
   isSelected,
   isActive,
+  isFlashing,
 }: {
   chat: Chat;
   isSelected: boolean;
   isActive: boolean;
+  isFlashing: boolean;
 }) {
   const hasUnread = chat.unreadCount > 0;
   const unreadIndicator = hasUnread ? "● " : "  ";
@@ -27,14 +32,14 @@ const ChatRow = memo(function ChatRow({
 
   return (
     <Text>
-      <Text color={hasUnread ? "cyan" : undefined} inverse={isSelected}>
+      <Text color={hasUnread ? "cyan" : undefined} inverse={isSelected || isFlashing}>
         {unreadIndicator}
       </Text>
-      <Text color={chat.isGroup ? "magenta" : undefined} inverse={isSelected}>
+      <Text color={chat.isGroup ? "magenta" : undefined} inverse={isSelected || isFlashing}>
         {groupIndicator}
       </Text>
       <Text
-        inverse={isSelected}
+        inverse={isSelected || isFlashing}
         bold={hasUnread || isActive}
         color={isActive ? "cyan" : undefined}
       >
@@ -77,6 +82,27 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
     };
   }, [chats, selectedIndex]);
 
+  const { startFlash, stopFlash, isFlashing } = useFlash();
+  const telegramService = useTelegramService();
+
+  // Subscribe to new messages for flash
+  useEffect(() => {
+    if (!telegramService) return;
+    const unsub = telegramService.onNewMessage((message, chatId) => {
+      if (!message.isOutgoing && chatId !== selectedChatId) {
+        startFlash(chatId, FLASH_CONFIG.chatFlashCount);
+      }
+    });
+    return unsub;
+  }, [telegramService, selectedChatId, startFlash]);
+
+  // Stop flash when chat is selected
+  useEffect(() => {
+    if (FLASH_CONFIG.stopOnSelect && selectedChatId) {
+      stopFlash(selectedChatId);
+    }
+  }, [selectedChatId, stopFlash]);
+
   return (
     <Box
       flexDirection="column"
@@ -107,6 +133,7 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
               chat={chat}
               isSelected={isFocused && globalIndex === selectedIndex}
               isActive={chat.id === selectedChatId}
+              isFlashing={isFlashing(chat.id)}
             />
           );
         })}
