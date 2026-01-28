@@ -1,10 +1,13 @@
-import { memo, useMemo, useState, useCallback, type Dispatch } from "react";
+import { memo, useMemo, useState, useCallback, useEffect, type Dispatch } from "react";
 import { Box, Text, useInput } from "ink";
 import type { Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
 import type { AppAction } from "../state/reducer.js";
 import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
 import { ReactionModal } from "./ReactionModal";
+import { useFlash } from "../hooks/useFlash.js";
+import { useTelegramService } from "../state/context.js";
+import { FLASH_CONFIG } from "../config/flashConfig.js";
 
 const VISIBLE_LINES = 20;
 const TOTAL_HEIGHT = 24; // Match ChatList height
@@ -100,6 +103,42 @@ function MessageViewInner({
     messageId: number;
     color: string;
   } | null>(null);
+
+  // New message flash state
+  const { startFlash: startMsgFlash, isFlashing: isMsgFlashing } = useFlash();
+  const {
+    startFlash: startIndicatorFlash,
+    isFlashing: isIndicatorFlashing,
+  } = useFlash();
+  const [newIndicatorVisible, setNewIndicatorVisible] = useState(false);
+  const telegramService = useTelegramService();
+
+  // Check if user is viewing the bottom of messages
+  const isAtBottom = useMemo(() => {
+    return selectedIndex >= chatMessages.length - 1;
+  }, [selectedIndex, chatMessages.length]);
+
+  // Subscribe to new messages for this chat
+  useEffect(() => {
+    const unsub = telegramService?.onNewMessage((message, incomingChatId) => {
+      if (message.isOutgoing || incomingChatId !== chatId) return;
+
+      if (isAtBottom) {
+        startMsgFlash(message.id, FLASH_CONFIG.messageFlashCount);
+      } else {
+        setNewIndicatorVisible(true);
+        startIndicatorFlash("new-indicator", FLASH_CONFIG.indicatorFlashCount);
+      }
+    });
+    return unsub;
+  }, [telegramService, chatId, isAtBottom, startMsgFlash, startIndicatorFlash]);
+
+  // Clear indicator when user scrolls to bottom
+  useEffect(() => {
+    if (isAtBottom) {
+      setNewIndicatorVisible(false);
+    }
+  }, [isAtBottom]);
 
   // Handle 'r' key for reactions and Enter for media panel
   useInput(
@@ -356,8 +395,8 @@ function MessageViewInner({
     const viewHint = isSelected && msg.media ? " [Enter]" : "";
     const timestamp = `[${formatTime(msg.timestamp)}]`;
     const senderColor = getSenderColor(msg.senderId);
-    const isFlashing = flashState?.messageId === msg.id;
-    const flashColor = isFlashing ? flashState.color : undefined;
+    const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
+    const flashColor = isFlashing ? flashState?.color : undefined;
 
     // Calculate padding for right-aligned messages
     const contentWidth = width - 4; // Account for borders and padding
@@ -501,8 +540,8 @@ function MessageViewInner({
             visibleMessages.map((msg, i) => {
               const actualIndex = startIndex + i;
               const isSelected = actualIndex === selectedIndex && isFocused;
-              const isFlashing = flashState?.messageId === msg.id;
-              const flashColor = isFlashing ? flashState.color : undefined;
+              const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
+              const flashColor = isFlashing ? flashState?.color : undefined;
 
               if (reactionPickerOpen && actualIndex === selectedIndex) {
                 return (
@@ -576,6 +615,11 @@ function MessageViewInner({
             })}
         {showScrollDown && (
           <Text dimColor> ↓ {chatMessages.length - endIndex} more</Text>
+        )}
+        {newIndicatorVisible && (
+          <Text inverse={isIndicatorFlashing("new-indicator")} color="cyan">
+            {" "}↓ new
+          </Text>
         )}
       </Box>
       {reactionModalOpen && (
