@@ -9,6 +9,8 @@ Terminal-based Telegram client built with React + Ink (terminal UI framework). U
 **_ IMPORTANT _**
 !!!! Before starting work on the project read all guidelines in /docs folder. !!!!
 
+When fixing bugs - read and understand the problem, investigate the core issue. Prioritize small edits over big code additions.
+
 ## Commands
 
 ```bash

@@ -3,7 +3,7 @@ node_modules
 .planning/*
 .claude/*
 .planning/*
-
+docs/plans/*
 # output
 out
 dist
