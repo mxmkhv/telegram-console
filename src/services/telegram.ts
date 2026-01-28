@@ -57,6 +57,18 @@ function extractMedia(msg: Api.Message): MediaAttachment | undefined {
       };
     }
 
+    // Check for voice message
+    const audioAttr = attrs.find(a => a.className === 'DocumentAttributeAudio') as Api.DocumentAttributeAudio | undefined;
+    if (audioAttr?.voice) {
+      return {
+        type: 'voice',
+        fileSize: Number(doc.size),
+        duration: audioAttr.duration,
+        mimeType: doc.mimeType,
+        _message: msg,
+      };
+    }
+
     // Check for GIF/animation
     const isAnimated = attrs.some(a => a.className === 'DocumentAttributeAnimated');
     if (isAnimated || doc.mimeType === 'video/mp4') {

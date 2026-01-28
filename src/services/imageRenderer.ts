@@ -139,6 +139,12 @@ function formatBytes(bytes: number): string {
   return result;
 }
 
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
 function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
@@ -155,17 +161,24 @@ export function formatMediaMetadata(media: MediaAttachment, messageId: number): 
     gif: '🎬',
     video: '🎥',
     document: '📄',
+    voice: '🎤',
   };
 
   const icon = media.isAnimated ? '🎭' : icons[media.type] ?? '📎';
   const size = media.fileSize ? formatBytes(media.fileSize) : '';
   const dims = media.width && media.height ? `${media.width}x${media.height}` : '';
   const emoji = media.emoji ? `: ${media.emoji}` : '';
+  const duration = media.duration != null ? formatDuration(media.duration) : '';
 
-  const parts = [size, dims].filter(Boolean).join(', ');
-  const label = media.type === 'sticker'
-    ? `${media.isAnimated ? 'Animated Sticker' : 'Sticker'}${emoji}`
-    : capitalize(media.type);
+  const parts = [size, dims, duration].filter(Boolean).join(', ');
+  let label: string;
+  if (media.type === 'sticker') {
+    label = `${media.isAnimated ? 'Animated Sticker' : 'Sticker'}${emoji}`;
+  } else if (media.type === 'voice') {
+    label = 'Voice';
+  } else {
+    label = capitalize(media.type);
+  }
 
   const result = `[${icon} ${label}${parts ? `: ${parts}` : ''}]`;
   metadataCache.set(messageId, result);

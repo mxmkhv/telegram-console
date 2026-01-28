@@ -19,7 +19,7 @@ export type FocusedPanel = "header" | "chatList" | "messages" | "input" | "media
 export type CurrentView = "chat" | "settings";
 export type LogoutMode = "session" | "full";
 
-export type MediaType = "photo" | "sticker" | "gif" | "video" | "document";
+export type MediaType = "photo" | "sticker" | "gif" | "video" | "document" | "voice";
 
 export interface MediaAttachment {
   type: MediaType;
@@ -30,6 +30,7 @@ export interface MediaAttachment {
   emoji?: string;           // for stickers
   isAnimated?: boolean;     // TGS/video stickers
   fileName?: string;
+  duration?: number;        // for voice/video in seconds
   _message: Api.Message;    // GramJS reference for download
 }
 
