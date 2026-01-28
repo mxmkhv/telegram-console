@@ -613,8 +613,8 @@ function MessageViewInner({
               );
             })}
         {showScrollDown && (
-          <Text dimColor>
-            {" "}↓ <Text inverse={isIndicatorFlashing("scroll-indicator")}>{chatMessages.length - endIndex}</Text> more
+          <Text dimColor inverse={isIndicatorFlashing("scroll-indicator")}>
+            {" "}↓ {chatMessages.length - endIndex} more
           </Text>
         )}
       </Box>
