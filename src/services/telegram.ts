@@ -123,7 +123,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
 
   let connectionState: ConnectionState = "disconnected";
   let connectionCallback: ((state: ConnectionState) => void) | null = null;
-  let _messageCallback: ((message: Message, chatId: string) => void) | null = null;
+  const _messageCallbacks = new Set<(message: Message, chatId: string) => void>();
   let eventHandlerAdded = false;
 
   function setConnectionState(state: ConnectionState) {
@@ -158,7 +158,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
               media: extractMedia(msg),
               reactions: extractReactions(msg),
             };
-            _messageCallback?.(message, chatId);
+            _messageCallbacks.forEach(cb => cb(message, chatId));
           },
           new NewMessage({})
         );
@@ -257,11 +257,9 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
     },
 
     onNewMessage(callback) {
-      _messageCallback = callback;
+      _messageCallbacks.add(callback);
       return () => {
-        if (_messageCallback === callback) {
-          _messageCallback = null;
-        }
+        _messageCallbacks.delete(callback);
       };
     },
 

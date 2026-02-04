@@ -55,14 +55,29 @@ function hasUserReaction(reactions: Message["reactions"]): boolean {
   return reactions?.some((r) => r.hasUserReacted) ?? false;
 }
 
-function getMessageLineCount(msg: Message, _isSelected: boolean): number {
+function getMessageLineCount(msg: Message, _isSelected: boolean, availableWidth: number): number {
   // Media metadata is now inline with sender, no extra lines needed
-  return msg.text.split("\n").length;
+  const lines = msg.text.split("\n");
+  if (availableWidth <= 0) return lines.length;
+  let total = 0;
+  for (const line of lines) {
+    total += Math.max(1, Math.ceil(line.length / availableWidth));
+  }
+  return total;
 }
 
-function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean): number {
-  const textLines = msg.text ? msg.text.split("\n").length : 0;
+function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean, availableWidth: number): number {
   const hasName = isGroupChat && !msg.isOutgoing;
+  if (!msg.text) return (hasName ? 1 : 0) + 1;
+  const lines = msg.text.split("\n");
+  let textLines = 0;
+  if (availableWidth <= 0) {
+    textLines = lines.length;
+  } else {
+    for (const line of lines) {
+      textLines += Math.max(1, Math.ceil(line.length / availableWidth));
+    }
+  }
   // name line (if group + not outgoing) + text lines (timestamp is inline on last line)
   return (hasName ? 1 : 0) + Math.max(1, textLines);
 }
@@ -308,15 +323,16 @@ function MessageViewInner({
   };
 
   // Calculate line count for each message
+  const contentWidth = width - 4; // Account for borders and padding
   const messageLineCounts = useMemo(() => {
     return chatMessages.map((msg, index) => {
       const isSelected = index === selectedIndex && isFocused;
       if (messageLayout === "bubble") {
-        return getBubbleMessageLineCount(msg, isGroupChat);
+        return getBubbleMessageLineCount(msg, isGroupChat, contentWidth);
       }
-      return getMessageLineCount(msg, isSelected);
+      return getMessageLineCount(msg, isSelected, contentWidth);
     });
-  }, [chatMessages, selectedIndex, isFocused, messageLayout, isGroupChat]);
+  }, [chatMessages, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
 
   const totalLines = useMemo(() => {
     return messageLineCounts.reduce((sum, count) => sum + count, 0);
@@ -424,7 +440,6 @@ function MessageViewInner({
     const flashColor = isFlashing ? flashState?.color : undefined;
 
     // Calculate padding for right-aligned messages
-    const contentWidth = width - 4; // Account for borders and padding
 
     return (
       <Box key={msg.id} flexDirection="column">
