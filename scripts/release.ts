@@ -12,7 +12,7 @@
  * 5. Push branch
  * 6. Create PR with gh CLI
  *
- * After PR is merged, run `bun run release:publish` on main.
+ * After PR is merged, the release workflow auto-publishes to npm.
  */
 
 import { $ } from "bun";
@@ -108,13 +108,7 @@ Bumps version from ${currentVersion} to ${newVersion} (${releaseType} release).
 
 ### After merging
 
-Run on main:
-\`\`\`bash
-git pull origin main
-bun run release:publish
-\`\`\`
-
-This will publish to npm and create the git tag.`;
+Publishing to npm, git tagging, and GitHub Release creation are handled automatically by the release workflow.`;
 
   const prUrl = await exec([
     "gh", "pr", "create",
@@ -127,7 +121,7 @@ This will publish to npm and create the git tag.`;
   console.log(`\n✅ Release PR created: ${prUrl}`);
   console.log(`\n📝 Next steps:`);
   console.log(`   1. Review and merge the PR`);
-  console.log(`   2. On main, run: bun run release:publish`);
+  console.log(`   2. The release workflow will auto-publish to npm`);
 }
 
 main().catch((err) => {

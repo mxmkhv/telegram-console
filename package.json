@@ -41,8 +41,7 @@
     "prepublishOnly": "bun run build",
     "release:patch": "bun run scripts/release.ts patch",
     "release:minor": "bun run scripts/release.ts minor",
-    "release:major": "bun run scripts/release.ts major",
-    "release:publish": "git tag v$(node -p \"require('./package.json').version\") && git push origin --tags && npm publish"
+    "release:major": "bun run scripts/release.ts major"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
