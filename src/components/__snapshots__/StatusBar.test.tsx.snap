@@ -1,25 +1,25 @@
-// Bun Snapshot v1, https://goo.gl/fbAQLP
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`StatusBar renders correctly when connected 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connected] CHATLIST             [R: React] [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
+│ [Connected] CHATLIST                        [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`StatusBar renders correctly when connecting 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connecting...] CHATLIST         [R: React] [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
+│ [Connecting...] CHATLIST                    [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`StatusBar renders correctly when disconnected 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Disconnected] CHATLIST          [R: React] [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
+│ [Disconnected] CHATLIST                     [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`StatusBar renders with different focused panels 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connected] MESSAGES                 [R: React] [←: Chats] [Enter: Type] [Tab: Next] [Esc: Back] │
+│ [Connected] MESSAGES         [R: React] [Shift+R: Reply] [Enter: Message] [←: Chats] [Esc: Back] │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;

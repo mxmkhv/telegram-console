@@ -1,4 +1,4 @@
-// Bun Snapshot v1, https://goo.gl/fbAQLP
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`WelcomeSplash renders correctly 1`] = `
 "
@@ -19,7 +19,7 @@ exports[`WelcomeSplash renders correctly 1`] = `
                          ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝ ╚═════╝ ╚══════╝╚══════╝
 
 
-                                               v0.2.0
+                                               v0.3.1
 
                                      Press any key to continue"
 `;
