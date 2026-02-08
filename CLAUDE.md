@@ -6,124 +6,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Terminal-based Telegram client built with React + Ink (terminal UI framework). Uses GramJS for the Telegram API.
 
-**_ IMPORTANT _**
-!!!! Before starting work on the project read all guidelines in /docs folder. !!!!
+## Critical: Retrieval-Led Reasoning
+
+**IMPORTANT:** Prefer retrieval-led reasoning over pre-training knowledge. Do not guess — read the source first.
 
 When fixing bugs - read and understand the problem, investigate the core issue. Prioritize small edits over big code additions.
 
 ## Commands
 
-```bash
-bun run dev              # Run in development mode
-bun run build            # Production build (outputs to dist/)
-bun test                 # Run all tests
-bun test src/components/ChatList.test.tsx  # Run single test file
-bun run typecheck        # TypeScript type checking
-bun run lint             # ESLint
-```
+Use `bun run <script>` — see `package.json` for all scripts. Key: `dev`, `build`, `test`, `typecheck`, `lint`
 
-Run with mock Telegram service for testing UI without API:
+Mock mode (no API): `bun run src/index.tsx --mock`
 
-```bash
-bun run src/index.tsx --mock
-```
-
-## Architecture
-
-### Layer Structure
+## Architecture → [`guidelines/design.md`](guidelines/design.md)
 
 ```
-src/
-├── index.tsx           # Entry point, suppresses GramJS logs
-├── app.tsx             # Main component, orchestrates UI + keyboard handling
-├── components/         # Ink UI components
-├── services/           # Business logic (telegram.ts, mediaCache.ts)
-├── state/              # React Context + Reducer (Redux-like pattern)
-├── config/             # Persistent config via `conf` package
-└── types/              # TypeScript definitions
+layers:src/{index:entry+log-suppress,app:orchestration,components:ui,services:business-logic,state:context+reducer,config:persistent,types:definitions}
+state-pattern:{AppStateContext:read-only,AppDispatchContext:dispatch,TelegramServiceContext:telegram-client}
+hooks:{useApp,useAppState,useAppDispatch,useTelegramService}
+types:{FocusedPanel:5-panels,CurrentView:chat|settings,ConnectionState:3-states,TelegramService:interface}
+components:{Box:flexbox-yoga,borderStyle:panel-boundaries,useInput:keyboard,React.memo:structural-aggressive}
 ```
 
-### State Management
+## Performance → [`guidelines/performance.md`](guidelines/performance.md)
 
-Split context pattern for performance - prevents re-renders when only dispatch is needed:
-
-- `AppStateContext` - read-only state
-- `AppDispatchContext` - dispatch function
-- `TelegramServiceContext` - Telegram client instance
-
-Hooks: `useApp()`, `useAppState()`, `useAppDispatch()`, `useTelegramService()`
-
-### Key Types (src/types/index.ts)
-
-- `FocusedPanel`: `"header" | "chatList" | "messages" | "input" | "mediaPanel"`
-- `CurrentView`: `"chat" | "settings"`
-- `ConnectionState`: `"disconnected" | "connecting" | "connected"`
-- `TelegramService`: Interface for Telegram operations (connect, getChats, sendMessage, etc.)
-
-### Component Patterns
-
-Components follow Ink conventions:
-
-- Use `<Box>` for layout (Flexbox via Yoga)
-- Use `borderStyle` for panel boundaries
-- Use `useInput` hook for keyboard handling
-- Aggressive `React.memo` on structural components
-
-## Critical Performance Rules
-
-1. **No console.log** - corrupts Ink's terminal buffer, causes flicker
-2. **Memoize structural components** - Sidebar, MessageList, etc.
-3. **Virtualize lists** - only render visible rows based on terminal height
-4. **Colocate state** - keep typing state in InputBar, not in app root
-5. **Throttle high-frequency updates** - message streams, download progress
+```
+anti-flicker:{no-console.log:corrupts-stdout,aggressive-memo:structural-components,virtualize-lists:viewport-only,colocate-state:high-frequency-local}
+throttle:{message-streams:100ms-buffer,progress-bars:10-20fps,download-updates:50ms-min}
+layout:{fixed-dimensions:preferred,avoid-auto-in-loops,predictable-heights:chat-bubbles}
+rendering:{React.memo:Sidebar+MessageList,useMemo:expensive-calc,viewport-slicing:scroll-offset}
+```
 
 ## Testing
 
-Uses Bun test runner + `ink-testing-library`:
+Bun test runner + `ink-testing-library`. Mock service at `src/services/telegram.mock.ts`.
 
 ```typescript
 import { render } from "ink-testing-library";
-const { lastFrame } = render(<Component />);
-expect(lastFrame()).toContain("expected text");
+expect(render(<Component />).lastFrame()).toContain("expected text");
 ```
 
-Mock service at `src/services/telegram.mock.ts` for testing without API.
-
-## Git Workflow
-
-### Semantic Versioning for Commits
-
-Follow semantic versioning patterns in commit messages:
-
-- `feat:` - New features (minor version bump)
-- `fix:` - Bug fixes (patch version bump)
-- `docs:` - Documentation changes
-- `style:` - Code style changes (formatting, no logic change)
-- `refactor:` - Code refactoring (no feature or fix)
-- `perf:` - Performance improvements
-- `test:` - Adding or updating tests
-- `chore:` - Build process, dependencies, tooling
-
-Breaking changes should include `BREAKING CHANGE:` in the commit body or `!` after the type (e.g., `feat!:`).
-
-### Feature Development with Subtrees
-
-When developing features, break work into small, atomic commits organized as subtrees:
-
-1. **Plan the subtree** - Identify discrete subtasks before coding
-2. **One commit per subtask** - Each commit should be independently reviewable
-3. **Prefix with feature context** - e.g., `feat(media-panel): add thumbnail grid`
-4. **Keep commits buildable** - Each commit should pass lint/typecheck
-5. **Squash only at merge** - Preserve subtree history during development
-
-Example subtree for "Add media panel":
+## Git → [`guidelines/git.md`](guidelines/git.md)
 
 ```
-feat(media-panel): add MediaPanel component skeleton
-feat(media-panel): implement thumbnail grid layout
-feat(media-panel): add keyboard navigation
-feat(media-panel): connect to media cache service
-test(media-panel): add component tests
+commit:  <type>(<scope>): <description>  (lowercase, imperative, no period)
+types:   feat|fix|refactor|chore|docs|style|test|perf
+branch:  <type>/<short-slug>  (e.g., feature/media-panel, fix/keyboard-flicker)
+merge:   squash-and-merge (default), rebase-and-merge (for atomic commits)
+flow:    GitHub Flow (main is always deployable)
+subtree: feat(scope): task1 → feat(scope): task2 → feat(scope): task3 (atomic commits)
+```
+
+## Skills Index → `.claude/skills/`
+
+```
+[vercel-react-best-practices]|46 rules
+|CRITICAL:async-{defer-await,parallel,dependencies,suspense-boundaries}
+|CRITICAL:bundle-{barrel-imports,defer-third-party,conditional,preload}
+|MEDIUM:client-{swr-dedup,event-listeners,passive-event-listeners,localstorage-schema}
+|MEDIUM:rerender-{defer-reads,memo,derived-state,functional-setstate,transitions,use-ref-transient}
+|MEDIUM:rendering-{content-visibility,hoist-jsx,conditional-render,activity,usetransition-loading}
+|LOW:js-{index-maps,cache-property-access,early-exit,set-map-lookups,tosorted-immutable}
+|LOW:advanced-{event-handler-refs,init-once,use-latest}
+
+[vercel-composition-patterns]|8 rules
+|HIGH:architecture-{avoid-boolean-props,compound-components}
+|MEDIUM:state-{decouple-implementation,context-interface,lift-state}
+|MEDIUM:patterns-{explicit-variants,children-over-render-props}
+|MEDIUM:react19-{no-forwardref,use-hook}
+
+[webapp-testing]|Playwright browser testing
+|approach:{static→read-HTML-selectors,dynamic→with_server.py+Playwright}
+|scripts:{with_server.py:server-lifecycle,single+multi-server}
+|pattern:reconnaissance-then-action{navigate,networkidle,screenshot,inspect,act}
+|practices:{sync_playwright,headless,close-browser,descriptive-selectors,waits}
+|examples:{element_discovery,static_html_automation,console_logging}
+
+[create-pr]|PR creation with auto-review
+|workflow:{preflight-checks,prepare-content,create-pr,capture-url,auto-review,summary}
+|args:{title,--draft,--no-review,--branch}
+|default-branch:dev (never main unless explicit)
+|integration:pr-review-toolkit:review-pr
+
+[skill-creator]|Skill development guide
+|principles:{concise-context,progressive-disclosure,degrees-of-freedom}
+|structure:{SKILL.md-required,scripts-optional,references-optional,assets-optional}
+|process:{understand-examples,plan-contents,init-skill,edit-skill,package-skill,iterate}
+|patterns:{high-level-guide,domain-specific-org,conditional-details}
+|tools:{init_skill.py,package_skill.py}
 ```
 
 ## Environment Variables
