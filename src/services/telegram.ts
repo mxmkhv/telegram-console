@@ -87,6 +87,32 @@ function extractMedia(msg: Api.Message): MediaAttachment | undefined {
   return undefined;
 }
 
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function extractMessageText(m: Api.Message): string {
+  // Service messages (phone calls, etc.) have an action but no text
+  const action = (m as unknown as { action?: { className?: string; duration?: number; reason?: { className?: string }; video?: boolean } }).action;
+  if (action?.className === "MessageActionPhoneCall") {
+    const callType = action.video ? "video call" : "call";
+    if (action.reason?.className === "PhoneCallDiscardReasonMissed") {
+      return `Missed ${callType}`;
+    }
+    if (action.reason?.className === "PhoneCallDiscardReasonBusy") {
+      return `Declined ${callType}`;
+    }
+    if (action.duration) {
+      const mins = Math.floor(action.duration / 60);
+      const secs = action.duration % 60;
+      const dur = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      return `${capitalize(callType)} (${dur})`;
+    }
+    return capitalize(callType);
+  }
+  return m.message ?? m.text ?? "";
+}
+
 function extractReactions(msg: Api.Message): Message["reactions"] {
   const reactions = msg.reactions;
   if (!reactions?.results) return undefined;
@@ -152,7 +178,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
               id: msg.id,
               senderId: msg.senderId?.toString() ?? "",
               senderName: formatSenderName(sender),
-              text: msg.text ?? "",
+              text: extractMessageText(msg),
               timestamp: new Date(msg.date * 1000),
               isOutgoing: msg.out ?? false,
               media: extractMedia(msg),
@@ -200,7 +226,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         id: m.id,
         senderId: m.senderId?.toString() ?? "",
         senderName: formatSenderName(m.sender as GramJSSender | undefined),
-        text: m.message ?? "",
+        text: extractMessageText(m),
         timestamp: new Date(m.date * 1000),
         isOutgoing: m.out ?? false,
         media: extractMedia(m),
