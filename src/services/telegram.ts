@@ -87,26 +87,28 @@ function extractMedia(msg: Api.Message): MediaAttachment | undefined {
   return undefined;
 }
 
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function extractMessageText(m: Api.Message): string {
   // Service messages (phone calls, etc.) have an action but no text
   const action = (m as unknown as { action?: { className?: string; duration?: number; reason?: { className?: string }; video?: boolean } }).action;
-  if (action) {
-    if (action.className === "MessageActionPhoneCall") {
-      const callType = action.video ? "video call" : "call";
-      if (action.reason?.className === "PhoneCallDiscardReasonMissed") {
-        return `Missed ${callType}`;
-      }
-      if (action.reason?.className === "PhoneCallDiscardReasonBusy") {
-        return `Declined ${callType}`;
-      }
-      if (action.duration) {
-        const mins = Math.floor(action.duration / 60);
-        const secs = action.duration % 60;
-        const dur = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        return `${callType.charAt(0).toUpperCase() + callType.slice(1)} (${dur})`;
-      }
-      return callType.charAt(0).toUpperCase() + callType.slice(1);
+  if (action?.className === "MessageActionPhoneCall") {
+    const callType = action.video ? "video call" : "call";
+    if (action.reason?.className === "PhoneCallDiscardReasonMissed") {
+      return `Missed ${callType}`;
     }
+    if (action.reason?.className === "PhoneCallDiscardReasonBusy") {
+      return `Declined ${callType}`;
+    }
+    if (action.duration) {
+      const mins = Math.floor(action.duration / 60);
+      const secs = action.duration % 60;
+      const dur = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      return `${capitalize(callType)} (${dur})`;
+    }
+    return capitalize(callType);
   }
   return m.message ?? m.text ?? "";
 }
