@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { afterAll, beforeAll, describe, it, expect, mock } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
 import { MediaPanel } from "./MediaPanel";
@@ -18,11 +18,15 @@ mock.module("../services/imageRenderer.js", () => ({
 }));
 
 // Force the ANSI fallback path deterministically, keeping every other kittyImage
-// export real (so kittyImage.test.ts still exercises the real functions).
+// export real. mock.module is process-wide, so the override is scoped to this
+// file's tests and otherwise defers to the original (captured before mocking,
+// since the mock patches the imported namespace in place).
+let forceNoKitty = false;
 const realKitty = await import("../services/kittyImage.js");
+const { supportsKittyGraphics: realSupports } = realKitty;
 mock.module("../services/kittyImage.js", () => ({
   ...realKitty,
-  supportsKittyGraphics: () => false,
+  supportsKittyGraphics: (stream?: NodeJS.WriteStream) => (forceNoKitty ? false : realSupports(stream)),
 }));
 
 const mockMedia: MediaAttachment = {
@@ -47,6 +51,13 @@ const mockDownloadMedia = async () => Buffer.from("mock");
 const mockOnClose = () => {};
 
 describe("MediaPanel", () => {
+  beforeAll(() => {
+    forceNoKitty = true;
+  });
+  afterAll(() => {
+    forceNoKitty = false;
+  });
+
   it("renders with cyan border when focused", () => {
     const { lastFrame } = render(
       <MediaPanel

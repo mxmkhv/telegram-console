@@ -1,4 +1,10 @@
-// Generated from logo.svg (viewBox cropped to the mark: 5 1.5 36 23). Do not edit by hand.
+// Generated from logo.svg; regenerate rather than hand-edit. Recipe: crop the
+// viewBox to the mark (5 1.5 36 23), then
+// - braille: rasterize at 56×36 px with stroke-width 2.2, map each 2×4 px block
+//   to one braille cell (dot on when alpha > 110); a cell is dim when only the
+//   fold line / cursor contribute dots.
+// - PNG: rasterize at 576×368 px with fold and cursor at 55% opacity, white on
+//   transparent, saved as gray+alpha.
 
 export const LOGO_COLS = 28;
 export const LOGO_ROWS = 9;

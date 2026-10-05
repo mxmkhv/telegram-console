@@ -7,23 +7,24 @@ import { DIACRITICS } from "./kittyDiacritics.js";
 // Why placeholders (not direct placement): the image is emitted as ordinary
 // *text* (a grid of U+10EEEE placeholder chars colored with the image id), so it
 // lives inside Ink's <Text> and survives Ink's frame redraws without re-blitting
-// or absolute cursor positioning. Ghostty and iTerm 3.6+ support this; other
-// terminals fall back to ANSI half-blocks (see imageRenderer.ts).
+// or absolute cursor positioning. Callers own their fallback for terminals
+// without support: MediaPanel uses ANSI half-blocks, Logo uses braille.
 
 const ESC = "\x1b";
 const PLACEHOLDER = "\u{10EEEE}";
 
-// One id per on-screen image. Re-sending under the same id replaces the previous
-// image, so only one media panel / one logo can exist at a time.
+// Each id holds one image; re-sending under an id replaces its image. Two
+// mounted users of the same id would overwrite each other, and the first to
+// unmount would delete the image for both.
 export const MEDIA_IMAGE_ID = 1;
 export const LOGO_IMAGE_ID = 2;
 
+// Detection is env-based (see supports-terminal-graphics). Inside tmux the outer
+// terminal's env leaks through, but tmux drops unwrapped graphics sequences, so
+// trusting it would draw nothing instead of falling back.
 export function supportsKittyGraphics(stream: NodeJS.WriteStream = process.stdout): boolean {
-  try {
-    return !!createSupportsTerminalGraphics(stream).kitty;
-  } catch {
-    return false;
-  }
+  if (process.env.TMUX) return false;
+  return !!createSupportsTerminalGraphics(stream).kitty;
 }
 
 export interface KittyImage {
@@ -86,7 +87,8 @@ export async function tintAlphaMask(png: Buffer, hex: string): Promise<Buffer> {
   return (await img.getBuffer("image/png")) as Buffer;
 }
 
-// Delete the transmitted image (call on panel close to avoid ghosting).
+// Delete the image's placements (d=i) so nothing ghosts after its owner unmounts.
+// The image data stays cached under the id until the id is reused.
 export function clearKittyImage(imageId = MEDIA_IMAGE_ID): string {
   return `${ESC}_Ga=d,d=i,i=${imageId},q=2${ESC}\\`;
 }

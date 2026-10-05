@@ -1,6 +1,6 @@
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect } from "bun:test";
 import { Jimp } from "jimp";
-import { placeholderGridWindow, tintAlphaMask } from "./kittyImage.js";
+import { clearKittyImage, LOGO_IMAGE_ID, MEDIA_IMAGE_ID, placeholderGridWindow, supportsKittyGraphics, tintAlphaMask } from "./kittyImage.js";
 import { DIACRITICS } from "./kittyDiacritics.js";
 
 const PLACEHOLDER = "\u{10EEEE}";
@@ -75,5 +75,44 @@ describe("tintAlphaMask", () => {
   it("rejects colors that are not #rrggbb", async () => {
     const png = (await new Jimp({ width: 1, height: 1 }).getBuffer("image/png")) as Buffer;
     await expect(tintAlphaMask(png, "cyan")).rejects.toThrow('got "cyan"');
+  });
+});
+
+describe("supportsKittyGraphics", () => {
+  const savedEnv = { TERM_PROGRAM: process.env.TERM_PROGRAM, TMUX: process.env.TMUX };
+  const tty = { isTTY: true } as NodeJS.WriteStream;
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("detects a capable terminal on a TTY", () => {
+    process.env.TERM_PROGRAM = "ghostty";
+    delete process.env.TMUX;
+    expect(supportsKittyGraphics(tty)).toBe(true);
+  });
+
+  // Keeps output deterministic when tests run inside a capable terminal.
+  it("is false for a non-TTY stream", () => {
+    process.env.TERM_PROGRAM = "ghostty";
+    delete process.env.TMUX;
+    expect(supportsKittyGraphics({ isTTY: false } as NodeJS.WriteStream)).toBe(false);
+  });
+
+  it("is false inside tmux, which drops unwrapped graphics sequences", () => {
+    process.env.TERM_PROGRAM = "ghostty";
+    process.env.TMUX = "/tmp/tmux-501/default,1234,0";
+    expect(supportsKittyGraphics(tty)).toBe(false);
+  });
+});
+
+describe("image ids", () => {
+  it("keeps media and logo images apart", () => {
+    expect(LOGO_IMAGE_ID).not.toBe(MEDIA_IMAGE_ID);
+    expect(clearKittyImage()).toContain(`i=${MEDIA_IMAGE_ID},`);
+    expect(clearKittyImage(LOGO_IMAGE_ID)).toContain(`i=${LOGO_IMAGE_ID},`);
   });
 });

@@ -16,15 +16,12 @@ export { LOGO_COLS, LOGO_ROWS };
 
 const BRAND_BLUE = "#2AABEE";
 
-// Holds the logo's footprint while the Kitty image is being prepared, so the
-// layout doesn't shift when it appears. U+2800 (blank braille) rather than
-// spaces: Ink trims whitespace-only rows.
-const RESERVED_SPACE = Array.from({ length: LOGO_ROWS }, () => "⠀".repeat(LOGO_COLS)).join("\n");
+const LOGO_PLACEHOLDERS = placeholderGridWindow(LOGO_COLS, LOGO_ROWS, 0, 0, LOGO_COLS, LOGO_ROWS, LOGO_IMAGE_ID);
 
 /**
- * The project mark (logo.svg). Real pixels via the Kitty graphics protocol on
- * terminals that support it (Ghostty, Kitty, WezTerm, iTerm 3.6+), braille
- * everywhere else. Both are LOGO_COLS × LOGO_ROWS cells.
+ * The project mark (logo.svg). Real pixels via the Kitty graphics protocol when
+ * the terminal is detected as capable (see supportsKittyGraphics), braille
+ * everywhere else and in grayscale mode. Both are LOGO_COLS × LOGO_ROWS cells.
  */
 export const Logo = memo(function Logo() {
   const { stdout } = useStdout();
@@ -48,24 +45,23 @@ export const Logo = memo(function Logo() {
         transmitted = true;
         setTransmittedTint(tint);
       })
-      // The braille rendition is a complete substitute, so fall back to it.
+      // Only a bug can land here (skin tints are typed hex, the PNG is embedded),
+      // and the braille rendition is a complete substitute, so fall back to it.
       .catch(() => {
         if (!cancelled) setKittyFailed(true);
       });
     return () => {
       cancelled = true;
-      if (transmitted) stdout.write(clearKittyImage(LOGO_IMAGE_ID));
+      if (transmitted) {
+        stdout.write(clearKittyImage(LOGO_IMAGE_ID));
+        setTransmittedTint(null);
+      }
     };
   }, [kittyCapable, tint, stdout]);
 
   if (kittyCapable && !kittyFailed) {
-    return (
-      <Text>
-        {transmittedTint === tint
-          ? placeholderGridWindow(LOGO_COLS, LOGO_ROWS, 0, 0, LOGO_COLS, LOGO_ROWS, LOGO_IMAGE_ID)
-          : RESERVED_SPACE}
-      </Text>
-    );
+    if (transmittedTint !== tint) return <Box width={LOGO_COLS} height={LOGO_ROWS} />;
+    return <Text>{LOGO_PLACEHOLDERS}</Text>;
   }
 
   return (

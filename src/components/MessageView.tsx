@@ -558,6 +558,8 @@ function MessageViewInner({
   };
 
   if (!selectedChatTitle) {
+    // Room for the logo plus the border, gap and hint, with breathing space around it.
+    const fitsLogo = (height === undefined || height >= LOGO_ROWS + 6) && width >= LOGO_COLS + 6;
     return (
       <Box
         flexDirection="column"
@@ -569,14 +571,8 @@ function MessageViewInner({
       >
         {/* One wrapper so the group is centered as a unit: when centering lands on a
             half row, Ink rounds sibling boxes differently and overlaps them by a row. */}
-        <Box flexDirection="column" alignItems="center">
-          {(height === undefined || height >= LOGO_ROWS + 6) && width >= LOGO_COLS + 6 && (
-            <>
-              <Logo />
-              {/* blank braille, not a space: Ink drops whitespace-only rows */}
-              <Text>{"\u2800"}</Text>
-            </>
-          )}
+        <Box flexDirection="column" alignItems="center" gap={1}>
+          {fitsLogo && <Logo />}
           <Text dimColor>Select a chat to start</Text>
         </Box>
       </Box>
