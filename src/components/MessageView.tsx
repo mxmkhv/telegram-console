@@ -10,6 +10,7 @@ import { ReactionModal } from "./ReactionModal";
 import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
+import { getSenderColor, type SenderColors } from "../utils/senderColor.js";
 
 interface MessageViewProps {
   isFocused: boolean;
@@ -24,6 +25,7 @@ interface MessageViewProps {
   messageLayout: MessageLayout;
   isGroupChat: boolean;
   chatId: string | null;
+  senderColors?: SenderColors;
   setSelectedIndex?: (index: number) => void;
   sendReaction: (
     chatId: string,
@@ -128,20 +130,6 @@ function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean, available
   return (hasName ? 1 : 0) + Math.max(1, textLines);
 }
 
-// 10 distinct colors for senders (no blue - that's for you)
-const SENDER_COLORS = [
-  "green",
-  "yellow",
-  "magenta",
-  "red",
-  "cyan",
-  "white",
-  "greenBright",
-  "yellowBright",
-  "magentaBright",
-  "redBright",
-] as const;
-
 function MessageViewInner({
   isFocused,
   selectedChatTitle,
@@ -155,6 +143,7 @@ function MessageViewInner({
   messageLayout,
   isGroupChat,
   chatId,
+  senderColors,
   setSelectedIndex,
   sendReaction,
   removeReaction,
@@ -353,27 +342,6 @@ function MessageViewInner({
     [chatId, chatMessages, dispatch, removeReaction],
   );
 
-  // Build color map: assign colors to senders in order of first appearance
-  const senderColorMap = useMemo(() => {
-    const map = new Map<string, (typeof SENDER_COLORS)[number]>();
-    let colorIndex = 0;
-    for (const msg of chatMessages) {
-      if (!msg.isOutgoing && !map.has(msg.senderId)) {
-        map.set(
-          msg.senderId,
-          SENDER_COLORS[colorIndex % SENDER_COLORS.length]!,
-        );
-        colorIndex++;
-      }
-    }
-    return map;
-  }, [chatMessages]);
-
-  // Get color for a sender
-  const getSenderColor = (senderId: string) => {
-    return senderColorMap.get(senderId) ?? "white";
-  };
-
   // Calculate line count for each message
   // panelDividers skins have no left/right border columns, only paddingX.
   const contentWidth = width - (skin.panelDividers ? 2 : 4);
@@ -477,6 +445,9 @@ function MessageViewInner({
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
 
+  const colorForSender = (senderId: string) =>
+    senderColors?.[senderId] ?? getSenderColor(senderId);
+
   // Render a single message in bubble layout
   const renderBubbleMessage = (
     msg: Message,
@@ -488,7 +459,7 @@ function MessageViewInner({
     const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
     const viewHint = isSelected && msg.media ? " [Enter]" : "";
     const timestamp = `[${formatTime(msg.timestamp)}]`;
-    const senderColor = getSenderColor(msg.senderId);
+    const senderColor = colorForSender(msg.senderId);
     const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
     const flashColor = isFlashing ? flashState?.color : undefined;
 
@@ -695,7 +666,7 @@ function MessageViewInner({
                                   ? undefined // No color when selected (use inverse colors)
                                   : msg.isOutgoing
                                     ? "blue"
-                                    : getSenderColor(msg.senderId)
+                                    : colorForSender(msg.senderId)
                               }
                             >
                               {nbspSenderName}:

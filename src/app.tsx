@@ -580,6 +580,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 messageLayout={state.messageLayout}
                 isGroupChat={selectedChat?.isGroup ?? false}
                 chatId={state.selectedChatId}
+                senderColors={state.selectedChatId ? state.senderColors[state.selectedChatId] : undefined}
                 sendReaction={sendReaction}
                 removeReaction={removeReaction}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
