@@ -13,13 +13,14 @@ import { DIACRITICS } from "./kittyDiacritics.js";
 const ESC = "\x1b";
 const PLACEHOLDER = "\u{10EEEE}";
 
-// One image id is enough: only one media panel is open at a time, and re-sending
-// under the same id replaces the previous image.
-const IMAGE_ID = 1;
+// One id per on-screen image. Re-sending under the same id replaces the previous
+// image, so only one media panel / one logo can exist at a time.
+export const MEDIA_IMAGE_ID = 1;
+export const LOGO_IMAGE_ID = 2;
 
-export function supportsKittyGraphics(): boolean {
+export function supportsKittyGraphics(stream: NodeJS.WriteStream = process.stdout): boolean {
   try {
-    return !!createSupportsTerminalGraphics(process.stdout).kitty;
+    return !!createSupportsTerminalGraphics(stream).kitty;
   } catch {
     return false;
   }
@@ -70,14 +71,29 @@ export async function buildKittyImage(
   };
 }
 
+// Recolor a white-on-transparent mask PNG to `hex` (e.g. "#2AABEE"), keeping its
+// alpha — lets one embedded asset follow the active skin's accent color.
+export async function tintAlphaMask(png: Buffer, hex: string): Promise<Buffer> {
+  if (!/^#?[0-9a-f]{6}$/i.test(hex)) throw new Error(`tintAlphaMask expects a #rrggbb color, got "${hex}"`);
+  const rgb = Number.parseInt(hex.replace("#", ""), 16);
+  const img = await Jimp.fromBuffer(png);
+  const data = img.bitmap.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = (rgb >> 16) & 0xff;
+    data[i + 1] = (rgb >> 8) & 0xff;
+    data[i + 2] = rgb & 0xff;
+  }
+  return (await img.getBuffer("image/png")) as Buffer;
+}
+
 // Delete the transmitted image (call on panel close to avoid ghosting).
-export function clearKittyImage(): string {
-  return `${ESC}_Ga=d,d=i,i=${IMAGE_ID},q=2${ESC}\\`;
+export function clearKittyImage(imageId = MEDIA_IMAGE_ID): string {
+  return `${ESC}_Ga=d,d=i,i=${imageId},q=2${ESC}\\`;
 }
 
 // Two-step per spec: (1) transmit data only (a=t, no placement), then
 // (2) create a virtual placement (a=p, U=1) sized cols x rows.
-function transmitAndPlace(png: Buffer, cols: number, rows: number): string {
+export function transmitAndPlace(png: Buffer, cols: number, rows: number, imageId = MEDIA_IMAGE_ID): string {
   const b64 = png.toString("base64");
   const chunkSize = 4096;
   const total = Math.max(1, Math.ceil(b64.length / chunkSize));
@@ -86,10 +102,10 @@ function transmitAndPlace(png: Buffer, cols: number, rows: number): string {
     const chunk = b64.slice(i * chunkSize, (i + 1) * chunkSize);
     const more = i === total - 1 ? 0 : 1;
     out += i === 0
-      ? `${ESC}_Gi=${IMAGE_ID},a=t,f=100,t=d,q=2,m=${more};${chunk}${ESC}\\`
+      ? `${ESC}_Gi=${imageId},a=t,f=100,t=d,q=2,m=${more};${chunk}${ESC}\\`
       : `${ESC}_Gm=${more};${chunk}${ESC}\\`;
   }
-  out += `${ESC}_Ga=p,U=1,i=${IMAGE_ID},c=${cols},r=${rows},q=2${ESC}\\`;
+  out += `${ESC}_Ga=p,U=1,i=${imageId},c=${cols},r=${rows},q=2${ESC}\\`;
   return out;
 }
 
@@ -106,10 +122,11 @@ export function placeholderGridWindow(
   offY: number,
   winW: number,
   winH: number,
+  imageId = MEDIA_IMAGE_ID,
 ): string {
-  const setColor = IMAGE_ID <= 255
-    ? `${ESC}[38;5;${IMAGE_ID}m`
-    : `${ESC}[38;2;${(IMAGE_ID >> 16) & 0xff};${(IMAGE_ID >> 8) & 0xff};${IMAGE_ID & 0xff}m`;
+  const setColor = imageId <= 255
+    ? `${ESC}[38;5;${imageId}m`
+    : `${ESC}[38;2;${(imageId >> 16) & 0xff};${(imageId >> 8) & 0xff};${imageId & 0xff}m`;
   const reset = `${ESC}[39m`;
   const cols = Math.max(0, Math.min(winW, totalCols));
   const rows = Math.max(0, Math.min(winH, totalRows));

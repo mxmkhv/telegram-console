@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import { placeholderGridWindow } from "./kittyImage.js";
+import { Jimp } from "jimp";
+import { placeholderGridWindow, tintAlphaMask } from "./kittyImage.js";
 import { DIACRITICS } from "./kittyDiacritics.js";
 
 const PLACEHOLDER = "\u{10EEEE}";
@@ -57,5 +58,22 @@ describe("placeholderGridWindow", () => {
     const lines = grid.split("\n");
     expect(lines).toHaveLength(2);
     expect(Array.from(lines[0]!).filter((c) => c === PLACEHOLDER)).toHaveLength(3);
+  });
+});
+
+describe("tintAlphaMask", () => {
+  it("recolors every pixel and keeps the alpha channel", async () => {
+    const mask = new Jimp({ width: 2, height: 1, color: 0xffffffff });
+    mask.setPixelColor(0xffffff80, 1, 0); // half-transparent white
+    const png = (await mask.getBuffer("image/png")) as Buffer;
+
+    const tinted = await Jimp.fromBuffer(await tintAlphaMask(png, "#D97757"));
+    expect(tinted.getPixelColor(0, 0)).toBe(0xd97757ff);
+    expect(tinted.getPixelColor(1, 0)).toBe(0xd9775780);
+  });
+
+  it("rejects colors that are not #rrggbb", async () => {
+    const png = (await new Jimp({ width: 1, height: 1 }).getBuffer("image/png")) as Buffer;
+    await expect(tintAlphaMask(png, "cyan")).rejects.toThrow('got "cyan"');
   });
 });
