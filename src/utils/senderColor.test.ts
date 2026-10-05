@@ -13,10 +13,21 @@ describe("getSenderColor", () => {
   });
 });
 
+// Ids that hash to the same palette color, found at runtime so the tests
+// don't depend on specific hash outputs.
+function findCollidingIds(count: number): string[] {
+  const byColor = new Map<string, string[]>();
+  for (let i = 0; ; i++) {
+    const id = `user${i}`;
+    const ids = [...(byColor.get(getSenderColor(id)) ?? []), id];
+    if (ids.length === count) return ids;
+    byColor.set(getSenderColor(id), ids);
+  }
+}
+
 describe("assignSenderColors", () => {
   it("gives senders whose hashed colors collide distinct colors", () => {
-    // All three hash to the same palette color.
-    const ids = ["zuck", "bezos", "gates"];
+    const ids = findCollidingIds(3);
     expect(new Set(ids.map(getSenderColor)).size).toBe(1);
 
     const colors = assignSenderColors({}, ids);
@@ -40,16 +51,16 @@ describe("assignSenderColors", () => {
   });
 
   it("never changes existing assignments when new senders arrive", () => {
-    const first = assignSenderColors({}, ["zuck", "elon"]);
-    const next = assignSenderColors(first, ["bezos", "gates", "zuck"]);
-    expect(next.zuck).toBe(first.zuck);
+    const [a, b, c] = findCollidingIds(3) as [string, string, string];
+    const first = assignSenderColors({}, [c, "elon"]);
+    const next = assignSenderColors(first, [a, b, c]);
+    expect(next[c]).toBe(first[c]);
     expect(next.elon).toBe(first.elon);
   });
 
-  it("does not depend on the order senders appear in", () => {
-    expect(assignSenderColors({}, ["zuck", "bezos", "gates"])).toEqual(
-      assignSenderColors({}, ["gates", "zuck", "bezos"]),
-    );
+  it("does not depend on the order senders appear in within a batch", () => {
+    const [a, b, c] = findCollidingIds(3) as [string, string, string];
+    expect(assignSenderColors({}, [a, b, c])).toEqual(assignSenderColors({}, [c, a, b]));
   });
 
   it("returns the same object when there are no new senders", () => {

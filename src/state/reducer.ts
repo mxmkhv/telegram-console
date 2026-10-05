@@ -101,7 +101,8 @@ function withSenderColors(
   messages: Message[],
 ): Record<string, SenderColors> {
   const existing = senderColors[chatId] ?? {};
-  const senderIds = messages.filter((m) => !m.isOutgoing).map((m) => m.senderId);
+  // Posts without a sender (e.g. channels) have senderId "" and get no color.
+  const senderIds = messages.filter((m) => !m.isOutgoing && m.senderId).map((m) => m.senderId);
   const next = assignSenderColors(existing, senderIds);
   return next === existing ? senderColors : { ...senderColors, [chatId]: next };
 }

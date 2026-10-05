@@ -1,4 +1,4 @@
-// Excludes blue (you), red (errors) and cyan (focus accent).
+// Excludes blue (you), red (errors), cyan (focus accent) and their bright variants.
 export const SENDER_COLORS = [
   "green",
   "yellow",
@@ -10,7 +10,7 @@ export const SENDER_COLORS = [
 ] as const;
 
 export type SenderColor = (typeof SENDER_COLORS)[number];
-export type SenderColors = Record<string, SenderColor>;
+export type SenderColors = Readonly<Record<string, SenderColor>>;
 
 // FNV-1a: tiny, fast, and well distributed for short ids.
 function hashString(value: string): number {
@@ -26,7 +26,8 @@ function preferredColorIndex(senderId: string): number {
   return hashString(senderId) % SENDER_COLORS.length;
 }
 
-// Hash-only color, used once a chat has more senders than the palette.
+// Stateless hashed color: the render fallback for senders without an assigned
+// color, and what assignSenderColors picks once the palette is full.
 export function getSenderColor(senderId: string): SenderColor {
   return SENDER_COLORS[preferredColorIndex(senderId)]!;
 }
@@ -36,19 +37,20 @@ export function getSenderColor(senderId: string): SenderColor {
  * preferred (hashed) color when free, otherwise the next free one. Once the
  * palette is exhausted, senders fall back to their hashed color.
  * Existing assignments never change, so colors stay put as history loads.
+ * New ids are sorted so a batch's result doesn't depend on message order.
  */
 export function assignSenderColors(
   existing: SenderColors,
   senderIds: Iterable<string>,
 ): SenderColors {
-  const newIds = [...new Set(senderIds)].filter((id) => !(id in existing)).sort();
+  const newIds = [...new Set(senderIds)].filter((id) => !Object.hasOwn(existing, id)).sort();
   if (newIds.length === 0) return existing;
 
-  const assigned: SenderColors = { ...existing };
+  const assigned: Record<string, SenderColor> = { ...existing };
   const used = new Set(Object.values(existing));
   for (const id of newIds) {
     const preferred = preferredColorIndex(id);
-    let color = SENDER_COLORS[preferred]!;
+    let color = getSenderColor(id);
     for (let offset = 0; offset < SENDER_COLORS.length; offset++) {
       const candidate = SENDER_COLORS[(preferred + offset) % SENDER_COLORS.length]!;
       if (!used.has(candidate)) {
