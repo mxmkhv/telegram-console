@@ -4,6 +4,7 @@ import { Box, Text, useSkin } from "./ui";
 import type { Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
 import type { AppAction } from "../state/reducer.js";
+import { Logo, LOGO_COLS, LOGO_ROWS } from "./Logo";
 import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
 import { ReactionModal } from "./ReactionModal";
 import { useFlash } from "../hooks/useFlash.js";
@@ -557,6 +558,8 @@ function MessageViewInner({
   };
 
   if (!selectedChatTitle) {
+    // Room for the logo plus the border, gap and hint, with breathing space around it.
+    const fitsLogo = (height === undefined || height >= LOGO_ROWS + 6) && width >= LOGO_COLS + 6;
     return (
       <Box
         flexDirection="column"
@@ -566,7 +569,12 @@ function MessageViewInner({
         justifyContent="center"
         alignItems="center"
       >
-        <Text dimColor>Select a chat to start</Text>
+        {/* One wrapper so the group is centered as a unit: when centering lands on a
+            half row, Ink rounds sibling boxes differently and overlaps them by a row. */}
+        <Box flexDirection="column" alignItems="center" gap={1}>
+          {fitsLogo && <Logo />}
+          <Text dimColor>Select a chat to start</Text>
+        </Box>
       </Box>
     );
   }

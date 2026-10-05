@@ -5,7 +5,8 @@ export interface Skin {
   label: string;
   // Remaps the app's semantic Ink color names (cyan = accent, blue = secondary)
   // to skin-specific colors. Empty map = no remapping (current look unchanged).
-  colorMap: Record<string, string>;
+  // Hex only: the Kitty logo tints its image with the accent (tintAlphaMask).
+  colorMap: Record<string, `#${string}`>;
   glyphs: {
     caret: string;
   };

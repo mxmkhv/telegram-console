@@ -1,5 +1,6 @@
-import { describe, it, expect } from "bun:test";
-import { placeholderGridWindow } from "./kittyImage.js";
+import { afterEach, describe, it, expect } from "bun:test";
+import { Jimp } from "jimp";
+import { clearKittyImage, LOGO_IMAGE_ID, MEDIA_IMAGE_ID, placeholderGridWindow, supportsKittyGraphics, tintAlphaMask } from "./kittyImage.js";
 import { DIACRITICS } from "./kittyDiacritics.js";
 
 const PLACEHOLDER = "\u{10EEEE}";
@@ -57,5 +58,61 @@ describe("placeholderGridWindow", () => {
     const lines = grid.split("\n");
     expect(lines).toHaveLength(2);
     expect(Array.from(lines[0]!).filter((c) => c === PLACEHOLDER)).toHaveLength(3);
+  });
+});
+
+describe("tintAlphaMask", () => {
+  it("recolors every pixel and keeps the alpha channel", async () => {
+    const mask = new Jimp({ width: 2, height: 1, color: 0xffffffff });
+    mask.setPixelColor(0xffffff80, 1, 0); // half-transparent white
+    const png = (await mask.getBuffer("image/png")) as Buffer;
+
+    const tinted = await Jimp.fromBuffer(await tintAlphaMask(png, "#D97757"));
+    expect(tinted.getPixelColor(0, 0)).toBe(0xd97757ff);
+    expect(tinted.getPixelColor(1, 0)).toBe(0xd9775780);
+  });
+
+  it("rejects colors that are not #rrggbb", async () => {
+    const png = (await new Jimp({ width: 1, height: 1 }).getBuffer("image/png")) as Buffer;
+    await expect(tintAlphaMask(png, "cyan")).rejects.toThrow('got "cyan"');
+  });
+});
+
+describe("supportsKittyGraphics", () => {
+  const savedEnv = { TERM_PROGRAM: process.env.TERM_PROGRAM, TMUX: process.env.TMUX };
+  const tty = { isTTY: true } as NodeJS.WriteStream;
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("detects a capable terminal on a TTY", () => {
+    process.env.TERM_PROGRAM = "ghostty";
+    delete process.env.TMUX;
+    expect(supportsKittyGraphics(tty)).toBe(true);
+  });
+
+  // Keeps output deterministic when tests run inside a capable terminal.
+  it("is false for a non-TTY stream", () => {
+    process.env.TERM_PROGRAM = "ghostty";
+    delete process.env.TMUX;
+    expect(supportsKittyGraphics({ isTTY: false } as NodeJS.WriteStream)).toBe(false);
+  });
+
+  it("is false inside tmux, which drops unwrapped graphics sequences", () => {
+    process.env.TERM_PROGRAM = "ghostty";
+    process.env.TMUX = "/tmp/tmux-501/default,1234,0";
+    expect(supportsKittyGraphics(tty)).toBe(false);
+  });
+});
+
+describe("image ids", () => {
+  it("keeps media and logo images apart", () => {
+    expect(LOGO_IMAGE_ID).not.toBe(MEDIA_IMAGE_ID);
+    expect(clearKittyImage()).toContain(`i=${MEDIA_IMAGE_ID},`);
+    expect(clearKittyImage(LOGO_IMAGE_ID)).toContain(`i=${LOGO_IMAGE_ID},`);
   });
 });

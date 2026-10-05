@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
 import { MessageView, countWrappedLines } from "./MessageView";
+import { LOGO_COLS, LOGO_ROWS } from "./logoAssets";
 import { AppProvider } from "../state/context";
 import { SkinContext } from "./ui/SkinContext";
 import type { Message } from "../types";
@@ -304,5 +305,46 @@ describe("countWrappedLines", () => {
   it("counts leading whitespace and never under-counts", () => {
     // " abc" is 4 chars at width 3 -> at least 2 rows
     expect(countWrappedLines(" abc", 3)).toBe(2);
+  });
+});
+
+describe("MessageView empty state logo", () => {
+  const LOGO_INK = "⣿";
+
+  function renderEmptyState(width: number, height: number) {
+    return renderWithProvider(
+      <MessageView
+        isFocused={false}
+        selectedChatTitle={null}
+        messages={[]}
+        selectedIndex={0}
+        width={width}
+        height={height}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId={null}
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+      />
+    ).lastFrame()!;
+  }
+
+  it("shows the logo above the hint when the panel has room", () => {
+    const frame = renderEmptyState(LOGO_COLS + 6, LOGO_ROWS + 6);
+    expect(frame).toContain(LOGO_INK);
+    expect(frame.indexOf(LOGO_INK)).toBeLessThan(frame.indexOf("Select a chat to start"));
+  });
+
+  it("drops the logo but keeps the hint in a short panel", () => {
+    const frame = renderEmptyState(80, LOGO_ROWS + 5);
+    expect(frame).not.toContain(LOGO_INK);
+    expect(frame).toContain("Select a chat to start");
+  });
+
+  it("drops the logo but keeps the hint in a narrow panel", () => {
+    const frame = renderEmptyState(LOGO_COLS + 5, 30);
+    expect(frame).not.toContain(LOGO_INK);
+    expect(frame).toContain("Select a chat to start");
   });
 });

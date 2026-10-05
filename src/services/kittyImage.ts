@@ -7,22 +7,24 @@ import { DIACRITICS } from "./kittyDiacritics.js";
 // Why placeholders (not direct placement): the image is emitted as ordinary
 // *text* (a grid of U+10EEEE placeholder chars colored with the image id), so it
 // lives inside Ink's <Text> and survives Ink's frame redraws without re-blitting
-// or absolute cursor positioning. Ghostty and iTerm 3.6+ support this; other
-// terminals fall back to ANSI half-blocks (see imageRenderer.ts).
+// or absolute cursor positioning. Callers own their fallback for terminals
+// without support: MediaPanel uses ANSI half-blocks, Logo uses braille.
 
 const ESC = "\x1b";
 const PLACEHOLDER = "\u{10EEEE}";
 
-// One image id is enough: only one media panel is open at a time, and re-sending
-// under the same id replaces the previous image.
-const IMAGE_ID = 1;
+// Each id holds one image; re-sending under an id replaces its image. Two
+// mounted users of the same id would overwrite each other, and the first to
+// unmount would delete the image for both.
+export const MEDIA_IMAGE_ID = 1;
+export const LOGO_IMAGE_ID = 2;
 
-export function supportsKittyGraphics(): boolean {
-  try {
-    return !!createSupportsTerminalGraphics(process.stdout).kitty;
-  } catch {
-    return false;
-  }
+// Detection is env-based (see supports-terminal-graphics). Inside tmux the outer
+// terminal's env leaks through, but tmux drops unwrapped graphics sequences, so
+// trusting it would draw nothing instead of falling back.
+export function supportsKittyGraphics(stream: NodeJS.WriteStream = process.stdout): boolean {
+  if (process.env.TMUX) return false;
+  return !!createSupportsTerminalGraphics(stream).kitty;
 }
 
 export interface KittyImage {
@@ -70,14 +72,30 @@ export async function buildKittyImage(
   };
 }
 
-// Delete the transmitted image (call on panel close to avoid ghosting).
-export function clearKittyImage(): string {
-  return `${ESC}_Ga=d,d=i,i=${IMAGE_ID},q=2${ESC}\\`;
+// Recolor a white-on-transparent mask PNG to `hex` (e.g. "#2AABEE"), keeping its
+// alpha — lets one embedded asset follow the active skin's accent color.
+export async function tintAlphaMask(png: Buffer, hex: string): Promise<Buffer> {
+  if (!/^#?[0-9a-f]{6}$/i.test(hex)) throw new Error(`tintAlphaMask expects a #rrggbb color, got "${hex}"`);
+  const rgb = Number.parseInt(hex.replace("#", ""), 16);
+  const img = await Jimp.fromBuffer(png);
+  const data = img.bitmap.data;
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = (rgb >> 16) & 0xff;
+    data[i + 1] = (rgb >> 8) & 0xff;
+    data[i + 2] = rgb & 0xff;
+  }
+  return (await img.getBuffer("image/png")) as Buffer;
+}
+
+// Delete the image's placements (d=i) so nothing ghosts after its owner unmounts.
+// The image data stays cached under the id until the id is reused.
+export function clearKittyImage(imageId = MEDIA_IMAGE_ID): string {
+  return `${ESC}_Ga=d,d=i,i=${imageId},q=2${ESC}\\`;
 }
 
 // Two-step per spec: (1) transmit data only (a=t, no placement), then
 // (2) create a virtual placement (a=p, U=1) sized cols x rows.
-function transmitAndPlace(png: Buffer, cols: number, rows: number): string {
+export function transmitAndPlace(png: Buffer, cols: number, rows: number, imageId = MEDIA_IMAGE_ID): string {
   const b64 = png.toString("base64");
   const chunkSize = 4096;
   const total = Math.max(1, Math.ceil(b64.length / chunkSize));
@@ -86,10 +104,10 @@ function transmitAndPlace(png: Buffer, cols: number, rows: number): string {
     const chunk = b64.slice(i * chunkSize, (i + 1) * chunkSize);
     const more = i === total - 1 ? 0 : 1;
     out += i === 0
-      ? `${ESC}_Gi=${IMAGE_ID},a=t,f=100,t=d,q=2,m=${more};${chunk}${ESC}\\`
+      ? `${ESC}_Gi=${imageId},a=t,f=100,t=d,q=2,m=${more};${chunk}${ESC}\\`
       : `${ESC}_Gm=${more};${chunk}${ESC}\\`;
   }
-  out += `${ESC}_Ga=p,U=1,i=${IMAGE_ID},c=${cols},r=${rows},q=2${ESC}\\`;
+  out += `${ESC}_Ga=p,U=1,i=${imageId},c=${cols},r=${rows},q=2${ESC}\\`;
   return out;
 }
 
@@ -106,10 +124,11 @@ export function placeholderGridWindow(
   offY: number,
   winW: number,
   winH: number,
+  imageId = MEDIA_IMAGE_ID,
 ): string {
-  const setColor = IMAGE_ID <= 255
-    ? `${ESC}[38;5;${IMAGE_ID}m`
-    : `${ESC}[38;2;${(IMAGE_ID >> 16) & 0xff};${(IMAGE_ID >> 8) & 0xff};${IMAGE_ID & 0xff}m`;
+  const setColor = imageId <= 255
+    ? `${ESC}[38;5;${imageId}m`
+    : `${ESC}[38;2;${(imageId >> 16) & 0xff};${(imageId >> 8) & 0xff};${imageId & 0xff}m`;
   const reset = `${ESC}[39m`;
   const cols = Math.max(0, Math.min(winW, totalCols));
   const rows = Math.max(0, Math.min(winH, totalRows));
