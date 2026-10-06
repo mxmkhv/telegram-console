@@ -118,10 +118,35 @@ const DRIP_MESSAGES = [
   { chatId: "2", senderId: "2", senderName: "Donald", text: "TREMENDOUS progress on everything. Believe me." },
 ];
 
+// Operations the mock should reject. Read live, so tests can flip them mid-run.
+export interface MockFailures {
+  connect?: boolean;
+  getMessages?: boolean;
+  send?: boolean;
+  edit?: boolean;
+}
+
+// TG_MOCK_FAIL=send,edit,connect,getMessages makes those calls fail in --mock mode
+export function mockFailuresFromEnv(value = process.env.TG_MOCK_FAIL): MockFailures {
+  const names = new Set(value?.split(",").map((name) => name.trim()));
+  return {
+    connect: names.has("connect"),
+    getMessages: names.has("getMessages"),
+    send: names.has("send"),
+    edit: names.has("edit"),
+  };
+}
+
+function failIf(enabled: boolean | undefined, error: string) {
+  if (enabled) throw new Error(error);
+}
+
 export function createMockTelegramService(options?: {
   typingIntervalMs?: number;
   typingClearMs?: number;
+  failures?: MockFailures;
 }): TelegramService {
+  const failures = options?.failures ?? {};
   const typingIntervalMs = options?.typingIntervalMs ?? 8000;
   const typingClearMs = options?.typingClearMs ?? 3000;
   let connectionState: ConnectionState = "disconnected";
@@ -139,6 +164,11 @@ export function createMockTelegramService(options?: {
       connectionState = "connecting";
       connectionCallback?.(connectionState);
       await new Promise((r) => setTimeout(r, 100));
+      if (failures.connect) {
+        connectionState = "disconnected";
+        connectionCallback?.(connectionState);
+        throw new Error("Mock: network unreachable");
+      }
       connectionState = "connected";
       connectionCallback?.(connectionState);
 
@@ -202,6 +232,7 @@ export function createMockTelegramService(options?: {
     },
 
     async getMessages(chatId: string, limit = 50, offsetId?: number) {
+      failIf(failures.getMessages, "Mock: request timed out");
       const chatMessages = messages[chatId] ?? [];
       if (offsetId !== undefined) {
         // Return messages older than offsetId (simulating GramJS behavior)
@@ -218,6 +249,8 @@ export function createMockTelegramService(options?: {
     },
 
     async sendMessage(chatId: string, text: string, replyToMsgId?: number, replyToSenderName?: string) {
+      await new Promise((r) => setTimeout(r, 50));
+      failIf(failures.send, "Mock: CHAT_WRITE_FORBIDDEN");
       const message: Message = {
         id: Date.now(),
         senderId: "me",
@@ -259,6 +292,8 @@ export function createMockTelegramService(options?: {
     },
 
     async editMessage(chatId: string, messageId: number, newText: string) {
+      await new Promise((r) => setTimeout(r, 50));
+      failIf(failures.edit, "Mock: MESSAGE_EDIT_TIME_EXPIRED");
       const chatMessages = messages[chatId];
       if (chatMessages) {
         const msgIndex = chatMessages.findIndex((m) => m.id === messageId);

@@ -3,7 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { App } from "./app";
 import { AppProvider } from "./state/context";
-import { createMockTelegramService } from "./services/telegram.mock";
+import { createMockTelegramService, type MockFailures } from "./services/telegram.mock";
 import { MainApp } from "./app";
 
 describe("App Integration", () => {
@@ -168,5 +168,134 @@ describe("MainApp drafts", () => {
     await press(stdin, ...BACK_TO_CHATS, UP, ENTER);
     expect(lastFrame()).toContain("Replying to");
     expect(lastFrame()).toContain("replytext");
+  });
+});
+
+describe("MainApp failure feedback", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  let failures: MockFailures;
+  beforeEach(() => {
+    failures = {};
+    svc = createMockTelegramService({ failures });
+  });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const renderApp = () =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const ENTER = "\r";
+  const ESC = "\x1b";
+  const UP = "\x1b[A";
+
+  it("keeps a failed message marked as not sent, and Enter on it retries", async () => {
+    failures.send = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "hello", ENTER);
+    expect(lastFrame()).toContain("hello");
+    expect(lastFrame()).toContain("! not sent");
+    expect(lastFrame()).toContain("Message not sent");
+
+    failures.send = false;
+    await press(stdin, ESC, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame.match(/You: hello/g)).toHaveLength(1);
+    expect(frame).not.toContain("hello …");
+    expect(frame).not.toContain("not sent");
+  });
+
+  it("Up edits the last sent message, skipping one that failed to send", async () => {
+    failures.send = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "unsent", ENTER, UP);
+    expect(lastFrame()).toContain("> Why Jupiter?");
+  });
+
+  it("x discards a failed message", async () => {
+    failures.send = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "goodbye", ENTER, ESC);
+    expect(lastFrame()).toContain("goodbye ! not sent");
+
+    await press(stdin, "x");
+    expect(lastFrame()).not.toContain("goodbye");
+    expect(lastFrame()).not.toContain("Message not sent");
+  });
+
+  it("marks a failed edit as not saved, and x restores the original text", async () => {
+    failures.edit = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    // Elon chat: the last outgoing message is "Why Jupiter?"
+    await press(stdin, ENTER, UP, "!", ENTER);
+    expect(lastFrame()).toContain("Why Jupiter?!");
+    expect(lastFrame()).toContain("! edit not saved");
+
+    // Up selects the edited message (the last one is from Elon)
+    await press(stdin, ESC, UP, "x");
+    expect(lastFrame()).not.toContain("Why Jupiter?!");
+    expect(lastFrame()).toContain("Why Jupiter?");
+  });
+
+  it("saves an edit and clears its pending mark", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, UP, "!", ENTER);
+    expect(lastFrame()).toContain("You: Why Jupiter?!");
+    expect(lastFrame()).not.toContain("Why Jupiter?! …");
+    expect(lastFrame()).not.toContain("not saved");
+  });
+
+  it("undoing a twice-failed edit restores the text Telegram has", async () => {
+    failures.edit = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    // Edit "Why Jupiter?" twice, both fail, then undo from the messages panel
+    await press(stdin, ENTER, UP, "!", ENTER, UP, "?", ENTER);
+    expect(lastFrame()).toContain("Why Jupiter?!? ! edit not saved");
+
+    await press(stdin, ESC, UP, "x");
+    expect(lastFrame()).toContain("You: Why Jupiter?");
+    expect(lastFrame()).not.toContain("Why Jupiter?!");
+  });
+
+  it("shows a connection error and Ctrl+R retries", async () => {
+    failures.connect = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    expect(lastFrame()).toContain("Couldn't connect to Telegram");
+
+    failures.connect = false;
+    stdin.write("\x12"); // Ctrl+R
+    await wait(250);
+    expect(lastFrame()).not.toContain("Couldn't connect");
+    expect(lastFrame()).toContain("Elon Musk");
+  });
+
+  it("shows an error when a chat's messages fail to load", async () => {
+    failures.getMessages = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER);
+    expect(lastFrame()).toContain("Couldn't load Elon Musk");
   });
 });

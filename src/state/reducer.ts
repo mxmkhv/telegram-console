@@ -1,4 +1,4 @@
-import type { Chat, ChatDraft, Message, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
+import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
 import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
@@ -30,6 +30,7 @@ export interface AppState {
   isHidden: boolean;
   typingChats: Record<string, boolean>;
   drafts: Record<string, ChatDraft>;
+  notice: Notice | null;
 }
 
 export type AppAction =
@@ -65,7 +66,14 @@ export type AppAction =
   // Reply/Edit actions
   | { type: "SET_REPLYING_TO"; payload: Message | null }
   | { type: "SET_EDITING_MESSAGE"; payload: Message | null }
-  | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string } }
+  | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string; delivery: Delivery | undefined } }
+  // Delivery of sends/edits made from this client
+  | { type: "CONFIRM_MESSAGE"; payload: { chatId: string; localId: number; message: Message } }
+  // `text` is the text the result belongs to; results for an older edit are ignored
+  | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; text: string; delivery: Delivery | undefined } }
+  | { type: "DISCARD_UNSENT"; payload: { chatId: string; messageId: number } }
+  | { type: "SHOW_NOTICE"; payload: Omit<Notice, "id"> }
+  | { type: "CLEAR_NOTICE"; payload?: { id: number } }
   | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } }
   | { type: "SAVE_DRAFT"; payload: { chatId: string; draft: ChatDraft } };
 
@@ -96,6 +104,7 @@ export const initialState: AppState = {
   isHidden: false,
   typingChats: {},
   drafts: {},
+  notice: null,
 };
 
 function withSenderColors(
@@ -108,6 +117,39 @@ function withSenderColors(
   const senderIds = messages.filter((m) => !m.isOutgoing && m.senderId).map((m) => m.senderId);
   const next = assignSenderColors(existing, senderIds);
   return next === existing ? senderColors : { ...senderColors, [chatId]: next };
+}
+
+function mapMessage(
+  state: AppState,
+  chatId: string,
+  messageId: number,
+  update: (msg: Message) => Message,
+): AppState {
+  const messages = state.messages[chatId];
+  if (!messages) return state;
+  return {
+    ...state,
+    messages: {
+      ...state.messages,
+      [chatId]: messages.map((msg) => (msg.id === messageId ? update(msg) : msg)),
+    },
+  };
+}
+
+// A reload replaces the list with server data; keep sends and edits that
+// haven't been confirmed yet so they're never dropped silently.
+function keepUnconfirmed(loaded: Message[], previous: Message[] | undefined): Message[] {
+  const unconfirmed = previous?.filter((m) => m.delivery);
+  if (!unconfirmed?.length) return loaded;
+  const byId = new Map(unconfirmed.map((m) => [m.id, m]));
+  const merged = loaded.map((m) => byId.get(m.id) ?? m);
+  const loadedIds = new Set(loaded.map((m) => m.id));
+  const missing = unconfirmed.filter((m) => !loadedIds.has(m.id));
+  // Edited messages outside the loaded page are older than all of it; unsent
+  // messages are newer
+  const olderEdits = missing.filter((m) => m.delivery?.action === "edit");
+  const unsent = missing.filter((m) => m.delivery?.action === "send");
+  return [...olderEdits, ...merged, ...unsent];
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -139,7 +181,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         senderColors: withSenderColors(state.senderColors, action.payload.chatId, action.payload.messages),
         messages: {
           ...state.messages,
-          [action.payload.chatId]: action.payload.messages,
+          [action.payload.chatId]: keepUnconfirmed(
+            action.payload.messages,
+            state.messages[action.payload.chatId],
+          ),
         },
       };
 
@@ -394,19 +439,60 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case "UPDATE_MESSAGE": {
-      const { chatId, messageId, newText } = action.payload;
-      const messages = state.messages[chatId];
-      if (!messages) return state;
+      const { chatId, messageId, newText, delivery } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => ({ ...msg, text: newText, delivery }));
+    }
 
-      const updatedMessages = messages.map((msg) =>
-        msg.id === messageId ? { ...msg, text: newText } : msg
-      );
-
+    case "CONFIRM_MESSAGE": {
+      const { chatId, localId, message } = action.payload;
+      const messages = state.messages[chatId] ?? [];
+      // The NewMessage event may have delivered the real message first
+      const alreadyAdded = messages.some((m) => m.id === message.id);
+      const updatedMessages = alreadyAdded
+        ? messages.filter((m) => m.id !== localId)
+        : messages.map((m) => (m.id === localId ? message : m));
       return {
         ...state,
+        chats: state.chats.map((chat) =>
+          chat.id === chatId && chat.lastMessage?.id === localId
+            ? { ...chat, lastMessage: message }
+            : chat
+        ),
         messages: { ...state.messages, [chatId]: updatedMessages },
       };
     }
+
+    case "SET_DELIVERY": {
+      const { chatId, messageId, text, delivery } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => (msg.text === text ? { ...msg, delivery } : msg));
+    }
+
+    case "DISCARD_UNSENT": {
+      const { chatId, messageId } = action.payload;
+      const messages = state.messages[chatId];
+      const delivery = messages?.find((m) => m.id === messageId)?.delivery;
+      if (!messages || !delivery) return state;
+      if (delivery.action === "edit") {
+        return mapMessage(state, chatId, messageId, (msg) => ({
+          ...msg,
+          text: delivery.originalText,
+          delivery: undefined,
+        }));
+      }
+      return {
+        ...state,
+        messages: { ...state.messages, [chatId]: messages.filter((m) => m.id !== messageId) },
+      };
+    }
+
+    case "SHOW_NOTICE":
+      return { ...state, notice: { ...action.payload, id: (state.notice?.id ?? 0) + 1 } };
+
+    case "CLEAR_NOTICE":
+      if (!state.notice) return state;
+      // An expiring timer must not clear a newer notice
+      if (action.payload && action.payload.id !== state.notice.id) return state;
+      return { ...state, notice: null };
 
     case "SET_TYPING": {
       const { chatId, isTyping } = action.payload;

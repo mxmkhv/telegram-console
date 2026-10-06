@@ -109,6 +109,24 @@ function InputBarInner({
     );
   }, [editingMessage]);
 
+  // Enter clears the input inside a state updater so fast typing isn't lost;
+  // the submit runs after commit because updaters must not dispatch.
+  const pendingSubmit = useRef<string | null>(null);
+  useEffect(() => {
+    const text = pendingSubmit.current;
+    if (text === null || !selectedChatId) return;
+    pendingSubmit.current = null;
+    if (editingMessage && onEdit) {
+      if (text !== editingMessage.text) {
+        onEdit(text, selectedChatId, editingMessage.id);
+      }
+      onCancelEdit?.();
+      return;
+    }
+    onSubmit(text, selectedChatId);
+    onCancelReply?.();
+  });
+
   // Custom input handler - atomic state updates prevent character flipping
   useInput(
     (input, key) => {
@@ -130,25 +148,13 @@ function InputBarInner({
         return;
       }
 
-      // Submit on Enter
+      // Submit on Enter (sent from the effect above once the input clears)
       if (key.return) {
         setState((s) => {
           if (s.value.trim() && selectedChatId) {
             // Transform any trailing emoticon before submitting
             const { text: transformedText } = transformEmoticons(s.value, s.value.length);
-            const finalText = transformedText.trim();
-
-            // Edit mode: call onEdit
-            if (editingMessage && onEdit) {
-              if (finalText !== editingMessage.text) {
-                onEdit(finalText, selectedChatId, editingMessage.id);
-              }
-              onCancelEdit?.();
-              return { value: "", cursor: 0 };
-            }
-            // Normal/Reply mode: call onSubmit
-            onSubmit(finalText, selectedChatId);
-            onCancelReply?.();
+            pendingSubmit.current = transformedText.trim();
             return { value: "", cursor: 0 };
           }
           return s;
