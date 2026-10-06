@@ -36,11 +36,13 @@ function HighlightedTitle({ title, matched, isSelected }: { title: string; match
 
 function ChatSwitcherInner({ chats, onSelect, onClose, width, maxRows }: ChatSwitcherProps) {
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // Track the chat, not the row: new messages reorder chats while open
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const results = useMemo(() => rankByFuzzyMatch(chats, query, (chat) => chat.title), [chats, query]);
   const rowCount = Math.max(1, maxRows);
-  const index = Math.min(selectedIndex, Math.max(0, results.length - 1));
+  const index = Math.max(0, results.findIndex((r) => r.item.id === selectedId));
+  const selectRow = (row: number) => setSelectedId(results[row]?.item.id ?? null);
   // Keep the selection in view
   const start = Math.max(0, Math.min(index - rowCount + 1, results.length - rowCount));
   const visible = results.slice(Math.max(0, start), Math.max(0, start) + rowCount);
@@ -52,15 +54,15 @@ function ChatSwitcherInner({ chats, onSelect, onClose, width, maxRows }: ChatSwi
       const chat = results[index]?.item;
       if (chat) onSelect(chat.id);
     } else if (key.upArrow || (key.ctrl && input === "p")) {
-      setSelectedIndex(Math.max(0, index - 1));
+      selectRow(Math.max(0, index - 1));
     } else if (key.downArrow || (key.ctrl && input === "n")) {
-      setSelectedIndex(Math.min(results.length - 1, index + 1));
+      selectRow(Math.min(results.length - 1, index + 1));
     } else if (key.backspace || key.delete) {
       setQuery((q) => Array.from(q).slice(0, -1).join(""));
-      setSelectedIndex(0);
+      setSelectedId(null);
     } else if (input && !key.ctrl && !key.meta && !key.tab) {
       setQuery((q) => q + input);
-      setSelectedIndex(0);
+      setSelectedId(null);
     }
   });
 

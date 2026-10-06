@@ -60,6 +60,20 @@ describe("ChatSwitcher", () => {
     expect(selected).toEqual(["2"]);
   });
 
+  it("keeps the selected chat when the list reorders", async () => {
+    const selected: string[] = [];
+    const props = { onSelect: (id: string) => selected.push(id), onClose: () => {}, width: 40, maxRows: 5 };
+    const { stdin, rerender } = render(<ChatSwitcher chats={chats} {...props} />);
+    await wait();
+    await type(stdin, DOWN); // Donald Trump
+
+    // A new message moves Tech Bros to the top
+    rerender(<ChatSwitcher chats={[chats[2]!, chats[0]!, chats[1]!]} {...props} />);
+    await wait();
+    await type(stdin, ENTER);
+    expect(selected).toEqual(["2"]);
+  });
+
   it("shows an empty state, and backspace recovers from it", async () => {
     const { stdin, lastFrame, selected } = setup();
     await wait();

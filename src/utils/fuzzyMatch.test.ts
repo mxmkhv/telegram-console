@@ -20,9 +20,15 @@ describe("fuzzyMatch", () => {
     expect(fuzzyMatch("xyz", "Elon Musk")).toBeNull();
   });
 
-  it("marks every code unit of a matched emoji", () => {
+  it("marks a matched emoji by its start offset", () => {
     const match = fuzzyMatch("🚀", "Launch 🚀 team");
-    expect([...match!.matched]).toEqual([7, 8]);
+    expect([...match!.matched]).toEqual([7]);
+  });
+
+  it("keeps offsets aligned when lowercasing changes length", () => {
+    // "İ" lowercases to two code units; "z" is still at offset 2 of the original
+    const match = fuzzyMatch("z", "İaz");
+    expect([...match!.matched]).toEqual([2]);
   });
 });
 
