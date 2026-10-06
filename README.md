@@ -58,15 +58,83 @@ telegram-console
 
 ### Keyboard Shortcuts
 
-| Key    | Action                           |
-| ------ | -------------------------------- |
-| ↑/↓    | Navigate chats / scroll messages |
-| ←/→    | Switch panels                    |
-| Enter  | Select chat / send message       |
-| Tab    | Focus input                      |
-| Esc    | Go back                          |
-| Ctrl+X | Cancel reply / edit (in input)   |
-| Ctrl+C | Exit                             |
+Press `?` in the app for the full list. `^` means Ctrl.
+
+<!-- keymap:start (generated from src/keymap.ts by `bun run docs:keymap`) -->
+
+#### Anywhere (except while typing)
+
+| Key      | Action                             |
+| -------- | ---------------------------------- |
+| `?`      | Show this help                     |
+| `^K` `/` | Go to chat (^K works while typing) |
+| `Tab`    | Next panel                         |
+| `s`      | Settings                           |
+| `l`      | Log out                            |
+| `m`      | Toggle minimal layout              |
+| `h`      | Hide the screen; any key restores  |
+| `c`      | Toggle colors                      |
+| `^R`     | Retry a failed startup             |
+| `^C`     | Quit                               |
+
+#### Header
+
+| Key     | Action              |
+| ------- | ------------------- |
+| `←→`    | Choose a button     |
+| `Enter` | Activate the button |
+| `Esc`   | Go to chats         |
+
+#### Chats
+
+| Key     | Action                         |
+| ------- | ------------------------------ |
+| `↑↓`    | Move (←→ on narrow screens)    |
+| `Enter` | Open the chat and start typing |
+| `→`     | Go to messages (wide screens)  |
+| `Esc`   | Go to the header               |
+
+#### Messages
+
+| Key       | Action                             |
+| --------- | ---------------------------------- |
+| `↑↓`      | Select a message                   |
+| `r`       | React, or remove your reaction     |
+| `R`       | Reply                              |
+| `Enter`   | Open media, jump to reply, or type |
+| `Enter`   | Oldest message: load older ones    |
+| `Enter`   | Failed message: retry              |
+| `x`       | Failed message: discard or undo    |
+| `←` `Esc` | Go to chats                        |
+
+#### Typing
+
+| Key       | Action                          |
+| --------- | ------------------------------- |
+| `Enter`   | Send                            |
+| `↑`       | Edit last message (empty input) |
+| `^X`      | Cancel reply or edit            |
+| `^V`      | Send the image on the clipboard |
+| `^A` `^E` | Jump to start / end             |
+| `Esc`     | Leave the input; draft is kept  |
+
+#### Reactions
+
+| Key     | Action                             |
+| ------- | ---------------------------------- |
+| `←→`    | Choose (arrows in the full grid)   |
+| `Enter` | React; on [...] open the full grid |
+| `Esc`   | Cancel                             |
+
+#### Media viewer
+
+| Key           | Action          |
+| ------------- | --------------- |
+| `Space`       | Zoom            |
+| `Arrows`      | Pan when zoomed |
+| `Enter` `Esc` | Close           |
+
+<!-- keymap:end -->
 
 ## Features
 

@@ -6,22 +6,27 @@ import { SkinContext } from "./ui/SkinContext";
 
 describe("ShortcutsBar", () => {
   it("renders the shortcut legend", () => {
-    const frame = render(<ShortcutsBar />).lastFrame() ?? "";
+    const frame = render(<ShortcutsBar width={100} />).lastFrame() ?? "";
     expect(frame).toContain("m minimal");
     expect(frame).toContain("c colors");
-    expect(frame).toContain("Tab cycle");
+    expect(frame).toContain("Tab next panel");
   });
 
   it("renders a rule and the accent glyph above the legend under the claudeCode skin", () => {
     const frame =
       render(
         <SkinContext.Provider value="claudeCode">
-          <ShortcutsBar />
+          <ShortcutsBar width={100} />
         </SkinContext.Provider>,
       ).lastFrame() ?? "";
-    expect(frame).toContain("Tab cycle");
+    expect(frame).toContain("Tab next panel");
     expect(frame).toContain("⏵⏵");
     const lines = frame.split("\n");
     expect(lines[0]).toMatch(/^─+$/);
+  });
+
+  it("drops whole items on narrow terminals and keeps help", () => {
+    const frame = render(<ShortcutsBar width={30} />).lastFrame() ?? "";
+    expect(frame.trim()).toBe("? help · ^K go to chat");
   });
 });

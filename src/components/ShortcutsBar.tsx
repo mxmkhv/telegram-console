@@ -1,11 +1,18 @@
 import { memo } from "react";
 import { Box, Text, useSkin } from "./ui";
+import { fitHints, getHints } from "../keymap";
 
-const HINTS = "^K go to chat · Tab cycle · ^V send image · m minimal · h hide · c colors · s settings · l logout";
 const RIBBON_ICON = "⏵⏵";
+const GLOBAL_HINTS = getHints("global");
 
-function ShortcutsBarInner() {
+interface ShortcutsBarProps {
+  width: number;
+}
+
+function ShortcutsBarInner({ width }: ShortcutsBarProps) {
   const skin = useSkin();
+  // paddingX (2), plus the ribbon icon and its space
+  const hints = fitHints(GLOBAL_HINTS, width - 2 - (skin.inputRibbon ? RIBBON_ICON.length + 1 : 0));
 
   if (skin.inputRibbon) {
     // Thin rule + plain hint text directly under the input row, so the two
@@ -23,9 +30,7 @@ function ShortcutsBarInner() {
         />
         <Box paddingX={1}>
           <Text color="cyan">{RIBBON_ICON} </Text>
-          <Text dimColor wrap="truncate">
-            {HINTS}
-          </Text>
+          <Text dimColor>{hints}</Text>
         </Box>
       </Box>
     );
@@ -33,9 +38,7 @@ function ShortcutsBarInner() {
 
   return (
     <Box paddingX={1}>
-      <Text dimColor wrap="truncate">
-        {HINTS}
-      </Text>
+      <Text dimColor>{hints}</Text>
     </Box>
   );
 }

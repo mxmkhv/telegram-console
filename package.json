@@ -38,6 +38,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
+    "docs:keymap": "bun run scripts/sync-keymap-docs.ts",
     "prepublishOnly": "bun run build",
     "release:patch": "bun run scripts/release.ts patch",
     "release:minor": "bun run scripts/release.ts minor",

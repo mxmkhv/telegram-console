@@ -67,7 +67,7 @@ describe("MainApp minimal UI mode", () => {
     await new Promise((r) => setTimeout(r, 200));
     const frame = lastFrame() ?? "";
     expect(frame).toContain("telegram-console");
-    expect(frame).toMatch(/Connected|Tab: Next|Esc: Back/);
+    expect(frame).toContain("Connected");
   });
 
   it("pressing m switches to minimal mode and hides chrome", async () => {
@@ -372,7 +372,7 @@ describe("MainApp overlays own the keyboard", () => {
     await press(stdin, ESC);
     expect(lastFrame()).not.toContain("Switch tab");
     expect(lastFrame()).toContain("Elon Musk");
-    expect(lastFrame()).toContain("CHATLIST");
+    expect(lastFrame()).toMatch(/\] Chats/);
   });
 });
 
@@ -409,7 +409,7 @@ describe("MainApp chat switcher", () => {
     const frame = lastFrame() ?? "";
     expect(frame).not.toContain("Go to chat");
     expect(frame).toContain("Not yet. But I'm considering it");
-    expect(frame).toContain("INPUT");
+    expect(frame).toMatch(/\] Typing/);
   });
 
   it("Ctrl+K works from the input without typing into it, and Esc keeps the draft", async () => {
@@ -424,6 +424,43 @@ describe("MainApp chat switcher", () => {
     expect(frame).not.toContain("Go to chat");
     expect(frame).toContain("> draft");
     expect(frame).not.toContain("draftxy");
-    expect(frame).toContain("INPUT");
+    expect(frame).toMatch(/\] Typing/);
   });
 });
+
+describe("MainApp help overlay", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+
+  it("? opens help, keys don't reach the app behind it, and Esc closes it", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+
+    await press(stdin, "?");
+    expect(lastFrame()).toContain("Keyboard shortcuts");
+
+    await press(stdin, "s", "l");
+    expect(lastFrame()).toContain("Keyboard shortcuts");
+
+    await press(stdin, "\x1b");
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Keyboard shortcuts");
+    expect(frame).not.toContain("Switch tab");
+    expect(frame).not.toContain("What would you like to clear?");
+    expect(frame).toMatch(/\] Chats/);
+  });
+});
+
