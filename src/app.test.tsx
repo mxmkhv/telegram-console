@@ -297,6 +297,21 @@ describe("MainApp failure feedback", () => {
 
     await press(stdin, ENTER);
     expect(lastFrame()).toContain("Couldn't load Elon Musk");
+    expect(lastFrame()).toContain("Couldn't load messages");
+
+    // Ctrl+R works from the input, where opening the chat left focus
+    failures.getMessages = false;
+    await press(stdin, "\x12");
+    expect(lastFrame()).not.toContain("Couldn't load");
+    expect(lastFrame()).toContain("Mars got boring");
+  });
+
+  it("shows why the chat list is empty when startup fails", async () => {
+    failures.connect = true;
+    const { lastFrame } = renderApp();
+    await wait(250);
+    expect(lastFrame()).toContain("Couldn't load chats");
+    expect(lastFrame()).toContain("Press Ctrl+R to retry");
   });
 });
 

@@ -25,7 +25,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
       { keys: ["m"], action: "Toggle minimal layout", hint: "minimal" },
       { keys: ["h"], action: "Hide the screen; any key restores", hint: "hide" },
       { keys: ["c"], action: "Toggle colors", hint: "colors" },
-      { keys: ["^R"], action: "Retry a failed startup" },
+      { keys: ["^R"], action: "Retry whatever failed to load" },
       { keys: ["^C"], action: "Quit" },
     ],
   },

@@ -30,6 +30,7 @@ describe("ChatList", () => {
   it("renders correctly when focused", () => {
     const { lastFrame } = render(
       <ChatList
+        status="ready"
         chats={mockChats}
         selectedChatId="1"
         onSelectChat={() => {}}
@@ -43,6 +44,7 @@ describe("ChatList", () => {
   it("renders correctly when unfocused", () => {
     const { lastFrame } = render(
       <ChatList
+        status="ready"
         chats={mockChats}
         selectedChatId="1"
         onSelectChat={() => {}}
@@ -56,6 +58,7 @@ describe("ChatList", () => {
   it("renders chat with unread indicator in cyan", () => {
     const { lastFrame } = render(
       <ChatList
+        status="ready"
         chats={mockChats}
         selectedChatId="2"
         onSelectChat={() => {}}
@@ -69,6 +72,7 @@ describe("ChatList", () => {
   it("renders empty chat list", () => {
     const { lastFrame } = render(
       <ChatList
+        status="ready"
         chats={[]}
         selectedChatId={null}
         onSelectChat={() => {}}
@@ -87,7 +91,7 @@ describe("ChatList", () => {
       isGroup: false,
     }));
     const { lastFrame } = render(
-      <ChatList chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused height={12} />,
+      <ChatList status="ready" chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused height={12} />,
     );
     const frame = lastFrame() ?? "";
     const rowCount = chats.filter((c) => frame.includes(c.title)).length;
@@ -99,12 +103,12 @@ describe("ChatList", () => {
   it("renders the container at the given width", () => {
     const chats = [{ id: "1", title: "Alpha", unreadCount: 0, isGroup: false }];
     const wide = render(
-      <ChatList chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={false} />
+      <ChatList status="ready" chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={false} />
     ).lastFrame() ?? "";
     expect(wide.split("\n")[0]!.length).toBe(35); // default width
 
     const narrowBox = render(
-      <ChatList chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={false} width={20} />
+      <ChatList status="ready" chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={false} width={20} />
     ).lastFrame() ?? "";
     expect(narrowBox.split("\n")[0]!.length).toBe(20);
   });
@@ -113,12 +117,12 @@ describe("ChatList", () => {
     const chats = [{ id: "1", title: "Alpha", unreadCount: 0, isGroup: false }];
     const defaultFrame =
       render(
-        <ChatList chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={true} />
+        <ChatList status="ready" chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={true} />
       ).lastFrame() ?? "";
     const claudeCodeFrame =
       render(
         <SkinContext.Provider value="claudeCode">
-          <ChatList chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={true} />
+          <ChatList status="ready" chats={chats} selectedChatId={null} onSelectChat={() => {}} selectedIndex={0} isFocused={true} />
         </SkinContext.Provider>,
       ).lastFrame() ?? "";
 
@@ -136,6 +140,7 @@ describe("ChatList", () => {
     ];
     const { lastFrame } = render(
       <ChatList
+        status="ready"
         chats={chats}
         selectedChatId={"1"}
         onSelectChat={() => {}}
@@ -160,6 +165,7 @@ describe("ChatList", () => {
     const frame =
       render(
         <ChatList
+          status="ready"
           chats={chats}
           selectedChatId={"1"}
           onSelectChat={() => {}}
@@ -185,6 +191,7 @@ describe("ChatList", () => {
       const frame =
         render(
           <ChatList
+            status="ready"
             chats={chats}
             selectedChatId={"1"}
             onSelectChat={() => {}}

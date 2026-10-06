@@ -1,6 +1,6 @@
 import { memo, useMemo, useEffect } from "react";
 import { Box, Text, useSkin } from "./ui";
-import type { Chat, ChatDraft } from "../types";
+import type { Chat, ChatDraft, LoadStatus } from "../types";
 import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
@@ -61,8 +61,29 @@ const ChatRow = memo(function ChatRow({
   );
 });
 
+function ChatListPlaceholder({ status }: { status: LoadStatus }) {
+  if (status === "error") {
+    return (
+      <>
+        <Text color="red" wrap="truncate">
+          Couldn't load chats
+        </Text>
+        <Text dimColor wrap="truncate">
+          Press Ctrl+R to retry
+        </Text>
+      </>
+    );
+  }
+  return (
+    <Text dimColor wrap="truncate">
+      {status === "loading" ? "Loading chats…" : "No chats yet"}
+    </Text>
+  );
+}
+
 interface ChatListProps {
   chats: Chat[];
+  status: LoadStatus;
   selectedChatId: string | null;
   onSelectChat: (chatId: string) => void;
   selectedIndex: number;
@@ -73,7 +94,7 @@ interface ChatListProps {
   drafts?: Record<string, ChatDraft>;
 }
 
-function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused, height = 24, width = 35, typingChats, drafts }: ChatListProps) {
+function ChatListInner({ chats, status, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused, height = 24, width = 35, typingChats, drafts }: ChatListProps) {
   const skin = useSkin();
   // A single right-edge divider (panelDividers skins) doesn't consume any rows,
   // unlike a full round border's top+bottom border rows.
@@ -152,6 +173,8 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
       <Box flexDirection="column" paddingX={1}>
         {/* Top indicator */}
         <Text dimColor>{itemsAbove > 0 ? `  ↑ ${itemsAbove} more` : " "}</Text>
+
+        {chats.length === 0 && <ChatListPlaceholder status={status} />}
 
         {/* Chat items - one Text per line, newline separated */}
         {visibleChats.map((chat, i) => {

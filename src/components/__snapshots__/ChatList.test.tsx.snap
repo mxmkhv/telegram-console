@@ -86,7 +86,7 @@ exports[`ChatList renders empty chat list 1`] = `
 │ Chats                           │
 │─────────────────────────────────│
 │                                 │
-│                                 │
+│ No chats yet                    │
 │                                 │
 │                                 │
 │                                 │

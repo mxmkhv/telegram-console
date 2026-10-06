@@ -3,7 +3,7 @@ import { useInput } from "ink";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import { Box, Text, useSkin } from "./ui";
-import type { Message, MessageLayout } from "../types";
+import type { LoadStatus, Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
 import type { AppAction, ReactionOverlay } from "../state/reducer.js";
 import { Logo, LOGO_COLS, LOGO_ROWS } from "./Logo";
@@ -21,6 +21,7 @@ interface MessageViewProps {
   messages: Message[];
   selectedIndex: number;
   isLoadingOlder?: boolean;
+  loadStatus?: LoadStatus;
   canLoadOlder?: boolean;
   width: number;
   height?: number;
@@ -142,6 +143,7 @@ function MessageViewInner({
   messages: chatMessages,
   selectedIndex,
   isLoadingOlder = false,
+  loadStatus = "ready",
   canLoadOlder = false,
   width,
   height = 24,
@@ -643,6 +645,23 @@ function MessageViewInner({
           </Text>
         )}
       </Box>
+      {chatMessages.length === 0 ? (
+        <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center">
+          {loadStatus === "loading" && <Text dimColor>Loading messages…</Text>}
+          {loadStatus === "error" && (
+            <>
+              <Text color="red">Couldn't load messages</Text>
+              <Text dimColor>Press Ctrl+R to retry</Text>
+            </>
+          )}
+          {loadStatus === "ready" && (
+            <>
+              <Text dimColor>No messages yet</Text>
+              <Text dimColor>Say hi below</Text>
+            </>
+          )}
+        </Box>
+      ) : (
       <Box
         flexDirection="column"
         // Conversations sit on the input, like every chat app
@@ -693,6 +712,7 @@ function MessageViewInner({
           </Text>
         )}
       </Box>
+      )}
       {reactionModalOpen && (
         <Box position="absolute" marginTop={5} marginLeft={10}>
           <ReactionModal

@@ -1,12 +1,13 @@
 import { memo } from "react";
 import { Box, Text, useSkin } from "./ui";
-import type { Chat, ChatDraft } from "../types";
+import type { Chat, ChatDraft, LoadStatus } from "../types";
 
 const WINDOW = 3;
 const TITLE_MAX = 12;
 
 interface ChatStripProps {
   chats: Chat[];
+  status: LoadStatus;
   selectedIndex: number;
   selectedChatId: string | null;
   isFocused: boolean;
@@ -14,13 +15,22 @@ interface ChatStripProps {
   drafts?: Record<string, ChatDraft>;
 }
 
-function ChatStripInner({ chats, selectedIndex, selectedChatId, isFocused, typingChats, drafts }: ChatStripProps) {
+function ChatStripInner({ chats, status, selectedIndex, selectedChatId, isFocused, typingChats, drafts }: ChatStripProps) {
   const skin = useSkin();
   const total = chats.length;
+  if (status === "error") {
+    return (
+      <Box paddingX={1}>
+        <Text color="red" wrap="truncate">
+          Couldn't load chats · ^R retry
+        </Text>
+      </Box>
+    );
+  }
   if (total === 0) {
     return (
       <Box paddingX={1}>
-        <Text dimColor>No chats</Text>
+        <Text dimColor>{status === "loading" ? "Loading chats…" : "No chats yet"}</Text>
       </Box>
     );
   }
@@ -45,7 +55,8 @@ function ChatStripInner({ chats, selectedIndex, selectedChatId, isFocused, typin
           const prefix = isActive
             ? skin.name === "claudeCode" ? "" : skin.glyphs.caret
             : chat.isGroup ? "#" : "";
-          const title = chat.title.slice(0, TITLE_MAX);
+          // By code point, so an emoji is never cut in half
+          const title = Array.from(chat.title).slice(0, TITLE_MAX).join("");
           const isLast = i === windowChats.length - 1;
           const isTyping = !!typingChats?.[chat.id];
           const hasDraft = !isActive && !!drafts?.[chat.id];

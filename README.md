@@ -74,7 +74,7 @@ Press `?` in the app for the full list. `^` means Ctrl.
 | `m`      | Toggle minimal layout              |
 | `h`      | Hide the screen; any key restores  |
 | `c`      | Toggle colors                      |
-| `^R`     | Retry a failed startup             |
+| `^R`     | Retry whatever failed to load      |
 | `^C`     | Quit                               |
 
 #### Header

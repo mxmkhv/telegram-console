@@ -34,7 +34,7 @@ import { useTerminalSize } from "./hooks/useTerminalSize";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, Message } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, LoadStatus, Message } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
@@ -127,6 +127,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   // Initialize connection and load chats. Bumping connectAttempt retries.
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [initFailed, setInitFailed] = useState(false);
+  const [chatsLoaded, setChatsLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     const init = async () => {
@@ -135,7 +136,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         await telegramService.connect();
         step = "load your chats";
         const chats = await telegramService.getChats();
-        if (!cancelled) dispatch({ type: "SET_CHATS", payload: chats });
+        if (cancelled) return;
+        dispatch({ type: "SET_CHATS", payload: chats });
+        setChatsLoaded(true);
       } catch (err) {
         if (cancelled) return;
         setInitFailed(true);
@@ -174,12 +177,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     };
   }, [telegramService, dispatch]);
 
-  // Load messages when chat is selected and mark as read
+  // Load messages when chat is selected and mark as read. Bumping loadAttempt retries.
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadFailedChatId, setLoadFailedChatId] = useState<string | null>(null);
   useEffect(() => {
     if (!state.selectedChatId) return;
 
     const chatId = state.selectedChatId;
     let cancelled = false;
+    setLoadFailedChatId(null);
     const loadMessages = async () => {
       let messages: Message[];
       try {
@@ -187,9 +193,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       } catch (err) {
         if (cancelled) return;
         const title = stateRef.current.chats.find((c) => c.id === chatId)?.title ?? "this chat";
-        showError(`Couldn't load ${title}: switch to another chat and back to retry (${describeError(err)})`);
+        setLoadFailedChatId(chatId);
+        showError(`Couldn't load ${title}: press Ctrl+R to retry (${describeError(err)})`);
         return;
       }
+      if (cancelled) return;
       dispatch({
         type: "SET_MESSAGES",
         payload: { chatId, messages },
@@ -210,7 +218,27 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     return () => {
       cancelled = true;
     };
-  }, [state.selectedChatId, telegramService, dispatch, showError]);
+  }, [state.selectedChatId, loadAttempt, telegramService, dispatch, showError]);
+
+  const messagesStatus: LoadStatus = !state.selectedChatId
+    ? "ready"
+    : loadFailedChatId === state.selectedChatId
+      ? "error"
+      : state.messages[state.selectedChatId] === undefined
+        ? "loading"
+        : "ready";
+  const chatsStatus: LoadStatus = initFailed ? "error" : chatsLoaded ? "ready" : "loading";
+
+  // Ctrl+R retries whatever failed to load
+  const canRetry = initFailed || messagesStatus === "error";
+  const retry = useCallback(() => {
+    if (initFailed) {
+      retryInit();
+      return;
+    }
+    dispatch({ type: "CLEAR_NOTICE" });
+    setLoadAttempt((n) => n + 1);
+  }, [initFailed, retryInit, dispatch]);
 
   // Focus media panel when it opens
   useEffect(() => {
@@ -425,8 +453,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      if (key.ctrl && input === "r" && initFailed) {
-        retryInit();
+      if (key.ctrl && input === "r" && canRetry) {
+        retry();
         return;
       }
 
@@ -555,8 +583,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       if (overlayOpen) return;
       if (key.escape) {
         dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
-      } else if (key.ctrl && input === "r" && initFailed) {
-        retryInit();
+      } else if (key.ctrl && input === "r" && canRetry) {
+        retry();
       } else if (key.ctrl && input === "k") {
         openChatSwitcher();
       }
@@ -751,6 +779,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
             {narrow && (
               <ChatStrip
                 chats={state.chats}
+                status={chatsStatus}
                 selectedIndex={chatIndex}
                 selectedChatId={state.selectedChatId}
                 isFocused={isChatListFocused}
@@ -762,6 +791,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
               {!narrow && (
                 <ChatList
                   chats={state.chats}
+                  status={chatsStatus}
                   selectedChatId={state.selectedChatId}
                   onSelectChat={handleSelectChat}
                   selectedIndex={chatIndex}
@@ -779,6 +809,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 selectedIndex={messageIndex}
                 setSelectedIndex={setMessageIndex}
                 isLoadingOlder={isLoadingOlder}
+                loadStatus={messagesStatus}
                 canLoadOlder={canLoadOlder}
                 width={messageViewWidth}
                 height={panelHeight}

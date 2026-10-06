@@ -472,3 +472,33 @@ describe("MessageView day separators", () => {
   });
 });
 
+describe("MessageView load states", () => {
+  const renderEmpty = (loadStatus: "loading" | "ready" | "error") =>
+    renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[]}
+        selectedIndex={0}
+        loadStatus={loadStatus}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    ).lastFrame() ?? "";
+
+  it("tells loading, failed and empty chats apart", () => {
+    expect(renderEmpty("loading")).toContain("Loading messages…");
+    expect(renderEmpty("error")).toContain("Press Ctrl+R to retry");
+    expect(renderEmpty("ready")).toContain("No messages yet");
+  });
+});
+
