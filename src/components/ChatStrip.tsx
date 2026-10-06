@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Box, Text, useSkin } from "./ui";
-import type { Chat } from "../types";
+import type { Chat, ChatDraft } from "../types";
 
 const WINDOW = 3;
 const TITLE_MAX = 12;
@@ -11,9 +11,10 @@ interface ChatStripProps {
   selectedChatId: string | null;
   isFocused: boolean;
   typingChats?: Record<string, boolean>;
+  drafts?: Record<string, ChatDraft>;
 }
 
-function ChatStripInner({ chats, selectedIndex, selectedChatId, isFocused, typingChats }: ChatStripProps) {
+function ChatStripInner({ chats, selectedIndex, selectedChatId, isFocused, typingChats, drafts }: ChatStripProps) {
   const skin = useSkin();
   const total = chats.length;
   if (total === 0) {
@@ -47,9 +48,11 @@ function ChatStripInner({ chats, selectedIndex, selectedChatId, isFocused, typin
           const title = chat.title.slice(0, TITLE_MAX);
           const isLast = i === windowChats.length - 1;
           const isTyping = !!typingChats?.[chat.id];
+          const hasDraft = !isActive && !!drafts?.[chat.id];
           return (
             <Text key={chat.id}>
               {isTyping && <Text dimColor>…</Text>}
+              {hasDraft && <Text dimColor>✎</Text>}
               <Text
                 inverse={isHighlighted}
                 bold={isActive || hasUnread}

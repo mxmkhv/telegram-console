@@ -115,3 +115,58 @@ describe("MainApp shortcuts legend + color toggle", () => {
     expect(toggles).toBe(1);
   });
 });
+
+describe("MainApp drafts", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 60) => new Promise((r) => setTimeout(r, ms));
+  const renderApp = () =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const ENTER = "\r";
+  const ESC = "\x1b";
+  const UP = "\x1b[A";
+  const DOWN = "\x1b[B";
+  const LEFT = "\x1b[D";
+  // input -> messages -> chat list
+  const BACK_TO_CHATS = [ESC, LEFT];
+
+  it("keeps typed text with its chat and marks it ✎ while elsewhere", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "draftone", ...BACK_TO_CHATS, DOWN, ENTER);
+    expect(lastFrame()).not.toContain("draftone");
+    expect(lastFrame()).toContain("✎");
+
+    await press(stdin, ...BACK_TO_CHATS, UP, ENTER);
+    expect(lastFrame()).toContain("draftone");
+  });
+
+  it("restores a reply in progress, and Esc does not cancel it", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    // Open a chat, then reply to the selected message from the messages panel
+    await press(stdin, ENTER, ESC, "R", "replytext");
+    expect(lastFrame()).toContain("Replying to");
+
+    await press(stdin, ...BACK_TO_CHATS, DOWN, ENTER);
+    expect(lastFrame()).not.toContain("Replying to");
+
+    await press(stdin, ...BACK_TO_CHATS, UP, ENTER);
+    expect(lastFrame()).toContain("Replying to");
+    expect(lastFrame()).toContain("replytext");
+  });
+});

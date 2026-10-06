@@ -395,3 +395,72 @@ describe("senderColors", () => {
     expect(state.senderColors["1"]).toBeUndefined();
   });
 });
+
+describe("drafts", () => {
+  const msg = (id: number) => ({ id, senderId: "1", senderName: "Alice", text: "Original", timestamp: new Date(), isOutgoing: false });
+  const draft = (text: string, replyTo: ReturnType<typeof msg> | null = null, editing: ReturnType<typeof msg> | null = null) => ({ text, replyTo, editing });
+
+  it("saves a draft for a chat", () => {
+    const state = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("half a thought") } });
+    expect(state.drafts["1"]).toEqual(draft("half a thought"));
+  });
+
+  it("keeps a reply-only draft with no text", () => {
+    const state = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("", msg(7)) } });
+    expect(state.drafts["1"]?.replyTo?.id).toBe(7);
+  });
+
+  it("removes the draft when saved empty or whitespace-only", () => {
+    const saved = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("hi") } });
+    const cleared = appReducer(saved, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("   ") } });
+    expect(cleared.drafts["1"]).toBeUndefined();
+  });
+
+  it("returns the same state when saving empty with no existing draft", () => {
+    const next = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("") } });
+    expect(next).toBe(initialState);
+  });
+
+  it("SELECT_CHAT restores the chat's reply and edit context", () => {
+    const replying = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "2", draft: draft("re", msg(7)) } });
+    const editing = appReducer(replying, { type: "SAVE_DRAFT", payload: { chatId: "3", draft: draft("fix", null, msg(9)) } });
+
+    const toReply = appReducer(editing, { type: "SELECT_CHAT", payload: "2" });
+    expect(toReply.replyingToMessage?.id).toBe(7);
+    expect(toReply.editingMessage).toBeNull();
+
+    const toEdit = appReducer(toReply, { type: "SELECT_CHAT", payload: "3" });
+    expect(toEdit.replyingToMessage).toBeNull();
+    expect(toEdit.editingMessage?.id).toBe(9);
+
+    const toNone = appReducer(toEdit, { type: "SELECT_CHAT", payload: "4" });
+    expect(toNone.replyingToMessage).toBeNull();
+    expect(toNone.editingMessage).toBeNull();
+  });
+
+  it("re-selecting the open chat keeps its in-progress reply", () => {
+    const selected = appReducer(initialState, { type: "SELECT_CHAT", payload: "1" });
+    const replying = appReducer(selected, { type: "SET_REPLYING_TO", payload: msg(7) });
+    const reselected = appReducer(replying, { type: "SELECT_CHAT", payload: "1" });
+    expect(reselected.replyingToMessage?.id).toBe(7);
+  });
+
+  it("starting a reply ends an edit in progress", () => {
+    const editing = appReducer(initialState, { type: "SET_EDITING_MESSAGE", payload: msg(9) });
+    const replying = appReducer(editing, { type: "SET_REPLYING_TO", payload: msg(7) });
+    expect(replying.editingMessage).toBeNull();
+    expect(replying.replyingToMessage?.id).toBe(7);
+  });
+
+  it("starting an edit ends a reply in progress", () => {
+    const replying = appReducer(initialState, { type: "SET_REPLYING_TO", payload: msg(7) });
+    const editing = appReducer(replying, { type: "SET_EDITING_MESSAGE", payload: msg(9) });
+    expect(editing.replyingToMessage).toBeNull();
+    expect(editing.editingMessage?.id).toBe(9);
+  });
+
+  it("RESET_STATE clears drafts", () => {
+    const saved = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("hi") } });
+    expect(appReducer(saved, { type: "RESET_STATE" }).drafts).toEqual({});
+  });
+});

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from "react";
 import { useInput } from "ink";
 import { Box, Text, useSkin } from "./ui";
-import type { Message, ImageSendResult } from "../types";
+import type { Message, ImageSendResult, ChatDraft } from "../types";
 import { transformEmoticons } from "../utils/emoticonMap";
 
 interface InputBarProps {
@@ -15,6 +15,10 @@ interface InputBarProps {
   editingMessage?: Message | null;
   onCancelReply?: () => void;
   onCancelEdit?: () => void;
+  // Read on mount only - the parent keys InputBar by chat to restore drafts
+  initialText?: string;
+  // Called on unmount with the chat's text and reply/edit context
+  onSaveDraft?: (chatId: string, draft: ChatDraft) => void;
 }
 
 // Combined state to avoid race conditions between value and cursor
@@ -34,11 +38,36 @@ function InputBarInner({
   editingMessage,
   onCancelReply,
   onCancelEdit,
+  initialText = "",
+  onSaveDraft,
 }: InputBarProps) {
   // Single state object prevents race conditions between value and cursor updates
-  const [state, setState] = useState<InputState>({ value: "", cursor: 0 });
-  const prevChatIdRef = useRef(selectedChatId);
+  const [state, setState] = useState<InputState>(() => ({
+    value: initialText,
+    cursor: initialText.length,
+  }));
   const skin = useSkin();
+
+  // Save the draft on unmount. The parent keys InputBar by chat, so the last
+  // committed snapshot still holds the previous chat's text and reply/edit.
+  const snapshot = {
+    chatId: selectedChatId,
+    onSaveDraft,
+    text: state.value,
+    replyTo: replyingToMessage ?? null,
+    editing: editingMessage ?? null,
+  };
+  const draftSnapshot = useRef(snapshot);
+  useEffect(() => {
+    draftSnapshot.current = snapshot;
+  });
+  useEffect(
+    () => () => {
+      const { chatId, onSaveDraft: save, ...draft } = draftSnapshot.current;
+      if (chatId) save?.(chatId, draft);
+    },
+    []
+  );
 
   // Blinking text cursor (ribbon skin only) - focus is no longer shown via
   // color changes on the caret/rule, so the flashing cursor is the only
@@ -66,38 +95,32 @@ function InputBarInner({
     []
   );
 
-  // Clear input when chat changes
+  // Entering edit mode loads the message text; leaving it clears the input.
+  // The edit present at mount is a restored draft whose text may differ from
+  // the original, so skip it.
+  const prevEditingRef = useRef(editingMessage);
   useEffect(() => {
-    if (selectedChatId !== prevChatIdRef.current) {
-      setState({ value: "", cursor: 0 });
-      prevChatIdRef.current = selectedChatId;
-    }
-  }, [selectedChatId]);
-
-  // Populate input when entering edit mode
-  useEffect(() => {
-    if (editingMessage) {
-      setState({
-        value: editingMessage.text,
-        cursor: editingMessage.text.length,
-      });
-    }
+    if (editingMessage === prevEditingRef.current) return;
+    prevEditingRef.current = editingMessage;
+    setState(
+      editingMessage
+        ? { value: editingMessage.text, cursor: editingMessage.text.length }
+        : { value: "", cursor: 0 }
+    );
   }, [editingMessage]);
 
   // Custom input handler - atomic state updates prevent character flipping
   useInput(
     (input, key) => {
-      // Escape: cancel reply/edit mode
+      // Escape leaves the input (handled by App); reply/edit context is kept
       if (key.escape) {
-        if (editingMessage && onCancelEdit) {
-          onCancelEdit();
-          setState({ value: "", cursor: 0 });
-          return;
-        }
-        if (replyingToMessage && onCancelReply) {
-          onCancelReply();
-          return;
-        }
+        return;
+      }
+
+      // Cancel reply/edit mode (Ctrl+X)
+      if (key.ctrl && input === "x") {
+        if (editingMessage) onCancelEdit?.();
+        else if (replyingToMessage) onCancelReply?.();
         return;
       }
 
@@ -244,7 +267,7 @@ function InputBarInner({
       {/* Mode indicator */}
       {modeIndicator && (
         <Box paddingX={1}>
-          <Text dimColor>{modeIndicator} (Esc to cancel)</Text>
+          <Text dimColor>{modeIndicator} (^X to cancel)</Text>
         </Box>
       )}
       {skin.inputRibbon ? (

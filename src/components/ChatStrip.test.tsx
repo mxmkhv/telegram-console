@@ -73,4 +73,25 @@ describe("ChatStrip", () => {
       ).lastFrame() ?? "";
     expect(frame).toContain("…Bob");
   });
+
+  it("marks inactive chats with a draft with ✎", () => {
+    const chats = [
+      { id: "1", title: "Alice", unreadCount: 0, isGroup: false },
+      { id: "2", title: "Bob", unreadCount: 0, isGroup: false },
+    ];
+    const draft = { text: "hi", replyTo: null, editing: null };
+    const frame =
+      render(
+        <ChatStrip
+          chats={chats}
+          selectedIndex={0}
+          selectedChatId={"1"}
+          isFocused={false}
+          drafts={{ "1": draft, "2": draft }}
+        />
+      ).lastFrame() ?? "";
+    expect(frame).toContain("✎Bob");
+    expect(frame).not.toContain("✎Alice");
+  });
 });
+

@@ -3,6 +3,7 @@ import { render } from "ink-testing-library";
 import React from "react";
 import { InputBar } from "./InputBar";
 import { SkinContext } from "./ui/SkinContext";
+import type { ChatDraft, Message } from "../types";
 
 // Emoji constants for testing (matching emoticonMap.ts)
 const SLIGHTLY_SMILING_FACE = "\u{1F642}"; // 🙂
@@ -230,6 +231,147 @@ describe("InputBar", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(submittedText).toBe(`I ${RED_HEART} this`);
+    });
+  });
+
+  describe("drafts", () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 50));
+    const message = (text: string): Message => ({ id: 9, senderId: "me", senderName: "Alice", text, timestamp: new Date(), isOutgoing: true });
+
+    it("restores initialText with the cursor at the end", async () => {
+      const { lastFrame, stdin } = render(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" initialText="hello" />
+      );
+      expect(lastFrame()).toContain("hello");
+      stdin.write("!");
+      await tick();
+      expect(lastFrame()).toContain("hello!");
+    });
+
+    it("saves text and reply context on unmount", async () => {
+      const saved: Array<[string, ChatDraft]> = [];
+      const reply = message("question?");
+      const { stdin, unmount } = render(
+        <InputBar
+          isFocused={true}
+          onSubmit={mockOnSubmit}
+          selectedChatId="123"
+          replyingToMessage={reply}
+          onSaveDraft={(chatId, draft) => saved.push([chatId, draft])}
+        />
+      );
+      stdin.write("answer");
+      await tick();
+      unmount();
+      await tick();
+      expect(saved).toEqual([["123", { text: "answer", replyTo: reply, editing: null }]]);
+    });
+
+    it("saves an empty draft on unmount so a stale one is discarded", async () => {
+      const saved: Array<[string, ChatDraft]> = [];
+      const { stdin, unmount } = render(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" initialText="old" onSaveDraft={(chatId, draft) => saved.push([chatId, draft])} />
+      );
+      for (let i = 0; i < 3; i++) {
+        stdin.write("\x7f");
+        await tick();
+      }
+      unmount();
+      await tick();
+      expect(saved).toEqual([["123", { text: "", replyTo: null, editing: null }]]);
+    });
+
+    it("does not save a draft when no chat is selected", async () => {
+      let calls = 0;
+      const { unmount } = render(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId={null} onSaveDraft={() => calls++} />
+      );
+      unmount();
+      await tick();
+      expect(calls).toBe(0);
+    });
+
+    it("sends a restored edit draft as an edit with the revised text", async () => {
+      const edits: Array<[string, string, number]> = [];
+      let cancelled = 0;
+      const { stdin } = render(
+        <InputBar
+          isFocused={true}
+          onSubmit={mockOnSubmit}
+          onEdit={(text, chatId, messageId) => edits.push([text, chatId, messageId])}
+          onCancelEdit={() => cancelled++}
+          selectedChatId="123"
+          editingMessage={message("Original")}
+          initialText="Original, revised"
+        />
+      );
+      await tick();
+      stdin.write("\r");
+      await tick();
+      expect(edits).toEqual([["Original, revised", "123", 9]]);
+      expect(cancelled).toBe(1);
+    });
+
+    it("does not overwrite a restored edit draft with the original text", async () => {
+      const { lastFrame } = render(
+        <InputBar
+          isFocused={true}
+          onSubmit={mockOnSubmit}
+          selectedChatId="123"
+          editingMessage={message("Original")}
+          initialText="Original, revised"
+        />
+      );
+      await tick();
+      expect(lastFrame()).toContain("Original, revised");
+    });
+
+    it("Esc keeps the reply context; Ctrl+X cancels it", async () => {
+      let cancelled = 0;
+      const { stdin } = render(
+        <InputBar
+          isFocused={true}
+          onSubmit={mockOnSubmit}
+          selectedChatId="123"
+          replyingToMessage={message("question?")}
+          onCancelReply={() => cancelled++}
+        />
+      );
+      stdin.write("\x1b");
+      await tick();
+      expect(cancelled).toBe(0);
+      stdin.write("\x18");
+      await tick();
+      expect(cancelled).toBe(1);
+    });
+
+    it("Ctrl+X cancels edit mode, and leaving edit mode clears the text", async () => {
+      let cancelled = 0;
+      const editing = message("Original");
+      const props = { isFocused: true, onSubmit: mockOnSubmit, selectedChatId: "123", onCancelEdit: () => cancelled++ };
+      const { lastFrame, stdin, rerender } = render(<InputBar {...props} />);
+      rerender(<InputBar {...props} editingMessage={editing} />);
+      await tick();
+      expect(lastFrame()).toContain("Original");
+
+      stdin.write("\x18");
+      await tick();
+      expect(cancelled).toBe(1);
+
+      rerender(<InputBar {...props} editingMessage={null} />);
+      await tick();
+      expect(lastFrame()).not.toContain("Original");
+    });
+
+    it("still populates the input when edit mode starts after mount", async () => {
+      const { lastFrame, rerender } = render(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" />
+      );
+      rerender(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" editingMessage={message("Original")} />
+      );
+      await tick();
+      expect(lastFrame()).toContain("Original");
     });
   });
 });

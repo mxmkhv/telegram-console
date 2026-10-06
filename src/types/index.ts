@@ -73,6 +73,13 @@ export interface Message {
   replyToSenderName?: string;   // Sender name for display
 }
 
+// Unsent input for a chat, kept in memory for the session
+export interface ChatDraft {
+  text: string;
+  replyTo: Message | null;
+  editing: Message | null;
+}
+
 export interface TelegramService {
   connect(): Promise<void>;
   disconnect(): Promise<void>;

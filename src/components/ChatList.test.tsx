@@ -150,4 +150,57 @@ describe("ChatList", () => {
     expect(frame).toContain("Bob …");
     expect(frame).not.toContain("Alice …");
   });
+
+  it("marks inactive chats with a draft with ✎", () => {
+    const chats = [
+      { id: "1", title: "Alice", unreadCount: 0, isGroup: false },
+      { id: "2", title: "Bob", unreadCount: 0, isGroup: false },
+    ];
+    const draft = { text: "hi", replyTo: null, editing: null };
+    const frame =
+      render(
+        <ChatList
+          chats={chats}
+          selectedChatId={"1"}
+          onSelectChat={() => {}}
+          selectedIndex={0}
+          isFocused={false}
+          drafts={{ "1": draft, "2": draft }}
+        />
+      ).lastFrame() ?? "";
+    expect(frame).toContain("Bob ✎");
+    expect(frame).not.toContain("Alice ✎");
+  });
+
+  // Titles truncate by display width, so markers survive long, wide (CJK)
+  // titles and the narrower list used at small terminal widths.
+  for (const width of [35, 30]) {
+    it(`keeps ✎ and the unread count visible for long titles at width ${width}`, () => {
+      const chats = [
+        { id: "1", title: "Alice", unreadCount: 0, isGroup: false },
+        { id: "2", title: "A Very Long Group Chat Title Here", unreadCount: 99, isGroup: true },
+        { id: "3", title: "技术交流群技术交流群技术交流群", unreadCount: 0, isGroup: true },
+      ];
+      const draft = { text: "hi", replyTo: null, editing: null };
+      const frame =
+        render(
+          <ChatList
+            chats={chats}
+            selectedChatId={"1"}
+            onSelectChat={() => {}}
+            selectedIndex={0}
+            isFocused={false}
+            width={width}
+            drafts={{ "2": draft, "3": draft }}
+          />
+        ).lastFrame() ?? "";
+      const lines = frame.split("\n");
+      const latin = lines.find((l) => l.includes("A Very Long"))!;
+      const cjk = lines.find((l) => l.includes("技术"))!;
+      expect(latin).toMatch(/… ✎ \(99\) │$/);
+      expect(cjk).toMatch(/ ✎ │$/);
+      for (const line of lines) expect(Bun.stringWidth(line)).toBe(width);
+    });
+  }
 });
+
