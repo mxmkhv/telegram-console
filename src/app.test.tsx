@@ -462,5 +462,20 @@ describe("MainApp help overlay", () => {
     expect(frame).not.toContain("What would you like to clear?");
     expect(frame).toMatch(/\] Chats/);
   });
+
+  it("s opens Settings from the header too, as the legend promises", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+
+    await press(stdin, "\x1b");
+    expect(lastFrame()).toMatch(/\] Header/);
+
+    await press(stdin, "s");
+    expect(lastFrame()).toContain("Switch tab");
+  });
 });
 

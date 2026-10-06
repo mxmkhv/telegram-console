@@ -485,6 +485,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
+      if (input === "s" || input === "S") {
+        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
+        return;
+      }
+      if (input === "l" || input === "L") {
+        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
+        return;
+      }
+
       // Header panel navigation
       if (state.focusedPanel === "header") {
         if (key.escape) {
@@ -507,14 +516,6 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "header" });
         }
         // mediaPanel escape is handled in MediaPanel component
-        return;
-      }
-      if (input === "s" || input === "S") {
-        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
-        return;
-      }
-      if (input === "l" || input === "L") {
-        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
         return;
       }
 
@@ -818,7 +819,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
               onCancelReply={handleCancelReply}
               onCancelEdit={handleCancelEdit}
             />
-            <ShortcutsBar width={terminalWidth} />
+            <ShortcutsBar width={terminalWidth} isTyping={isInputFocused} />
           </>
         )}
         {!isMinimal && (

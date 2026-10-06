@@ -43,7 +43,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
       { keys: ["↑↓"], action: "Move (←→ on narrow screens)", hint: "move" },
       { keys: ["Enter"], action: "Open the chat and start typing", hint: "open" },
       { keys: ["→"], action: "Go to messages (wide screens)" },
-      { keys: ["Esc"], action: "Go to the header" },
+      { keys: ["Esc"], action: "Go to the header (full layout)" },
     ],
   },
   messages: {
@@ -105,6 +105,9 @@ const PANEL_SECTIONS: Record<FocusedPanel, KeymapSection> = {
 };
 
 export const HINT_SEPARATOR = " · ";
+
+/** Legend while typing: global keys type letters, so point the way out */
+export const TYPING_HINTS = ["^K go to chat", "Esc then ? help"];
 
 /** "keys label" items for a bar, in priority order */
 export function getHints(section: KeymapSection): string[] {

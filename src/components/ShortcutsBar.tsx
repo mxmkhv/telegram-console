@@ -1,18 +1,19 @@
 import { memo } from "react";
 import { Box, Text, useSkin } from "./ui";
-import { fitHints, getHints } from "../keymap";
+import { TYPING_HINTS, fitHints, getHints } from "../keymap";
 
 const RIBBON_ICON = "⏵⏵";
 const GLOBAL_HINTS = getHints("global");
 
 interface ShortcutsBarProps {
   width: number;
+  isTyping: boolean;
 }
 
-function ShortcutsBarInner({ width }: ShortcutsBarProps) {
+function ShortcutsBarInner({ width, isTyping }: ShortcutsBarProps) {
   const skin = useSkin();
   // paddingX (2), plus the ribbon icon and its space
-  const hints = fitHints(GLOBAL_HINTS, width - 2 - (skin.inputRibbon ? RIBBON_ICON.length + 1 : 0));
+  const hints = fitHints(isTyping ? TYPING_HINTS : GLOBAL_HINTS, width - 2 - (skin.inputRibbon ? RIBBON_ICON.length + 1 : 0));
 
   if (skin.inputRibbon) {
     // Thin rule + plain hint text directly under the input row, so the two

@@ -47,8 +47,10 @@ function HelpRow({ row, width }: { row: Row | undefined; width: number }) {
       )}
       {row?.kind === "binding" && (
         <>
-          <Box width={KEYS_WIDTH} flexShrink={0}>
-            <Text color="yellow">{row.keys}</Text>
+          <Box width={Math.min(KEYS_WIDTH, width)} flexShrink={0}>
+            <Text color="yellow" wrap="truncate">
+              {row.keys}
+            </Text>
           </Box>
           <Text wrap="truncate">{row.action}</Text>
         </>
@@ -97,10 +99,12 @@ function HelpOverlayInner({ onClose, width, height }: HelpOverlayProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} width={width}>
       <Box justifyContent="space-between">
-        <Text bold color="cyan">
+        <Text bold color="cyan" wrap="truncate">
           Keyboard shortcuts
         </Text>
-        <Text dimColor>^ = Ctrl</Text>
+        <Text dimColor wrap="truncate">
+          ^ = Ctrl
+        </Text>
       </Box>
       {visible.map(([left, right], i) => (
         <Box key={offset + i} height={1}>

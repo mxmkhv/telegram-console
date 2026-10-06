@@ -92,7 +92,7 @@ Press `?` in the app for the full list. `^` means Ctrl.
 | `↑↓`    | Move (←→ on narrow screens)    |
 | `Enter` | Open the chat and start typing |
 | `→`     | Go to messages (wide screens)  |
-| `Esc`   | Go to the header               |
+| `Esc`   | Go to the header (full layout) |
 
 #### Messages
 

@@ -5,8 +5,9 @@
  * Usage: bun run docs:keymap
  */
 
+import { fileURLToPath } from "node:url";
 import { syncReadmeKeymap } from "../src/keymap";
 
-const path = new URL("../README.md", import.meta.url).pathname;
+const path = fileURLToPath(new URL("../README.md", import.meta.url));
 await Bun.write(path, syncReadmeKeymap(await Bun.file(path).text()));
 console.log("README.md keymap updated");
