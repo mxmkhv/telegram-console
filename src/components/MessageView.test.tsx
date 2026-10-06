@@ -743,7 +743,15 @@ describe("MessageView tall messages", () => {
   const tick = () => new Promise((r) => setTimeout(r, 30));
 
   // height 12 leaves 8 message rows: one for "↑ earlier", one for what's left below
-  function Harness({ messages, initialIndex }: { messages: Message[]; initialIndex: number }) {
+  function Harness({
+    messages,
+    initialIndex,
+    loadStatus,
+  }: {
+    messages: Message[];
+    initialIndex: number;
+    loadStatus?: React.ComponentProps<typeof MessageView>["loadStatus"];
+  }) {
     const [selectedIndex, setSelectedIndex] = React.useState(initialIndex);
     return (
       <MessageView
@@ -752,6 +760,7 @@ describe("MessageView tall messages", () => {
         messages={messages}
         selectedIndex={selectedIndex}
         setSelectedIndex={setSelectedIndex}
+        loadStatus={loadStatus}
         width={40}
         height={12}
         dispatch={mockDispatch}
@@ -942,5 +951,42 @@ describe("MessageView tall messages", () => {
     stdin.write("x");
     await tick();
     expect(lastFrame()).toMatch(/line 1 /);
+  });
+
+  it("navigation keys do nothing in a chat with no messages", async () => {
+    for (const loadStatus of ["loading", "error", "ready"] as const) {
+      const { lastFrame, stdin } = renderWithProvider(<Harness messages={[]} initialIndex={0} loadStatus={loadStatus} />);
+      for (const key of ["g", "\x1b[H", "G", "\x1b[F", "j", "k", "\x1b[5~", "\x1b[6~"]) {
+        stdin.write(key);
+        await tick();
+      }
+      expect(lastFrame()).toContain(loadStatus === "loading" ? "Loading messages" : loadStatus === "error" ? "Couldn't load" : "No messages yet");
+    }
+  });
+
+  it("Enter in a chat with no messages still goes to the input", async () => {
+    const actions: unknown[] = [];
+    const { stdin } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[]}
+        selectedIndex={0}
+        width={40}
+        height={12}
+        dispatch={(action) => actions.push(action)}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    stdin.write("\r");
+    await tick();
+    expect(actions).toContainEqual({ type: "SET_FOCUSED_PANEL", payload: "input" });
   });
 });
