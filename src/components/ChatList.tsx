@@ -5,7 +5,7 @@ import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
 import { formatChatTime } from "../utils/formatDate.js";
-import { getMessagePreview } from "../utils/messagePreview.js";
+import { flattenLines, getMessagePreview } from "../utils/messagePreview.js";
 
 // Layout constants
 const INDICATOR_LINES = 2; // Top and bottom scroll indicators
@@ -54,7 +54,7 @@ const ChatRow = memo(function ChatRow({
         </Box>
         <Box flexGrow={1}>
           <Text wrap="truncate" {...titleStyle}>
-            {chat.title}
+            {flattenLines(chat.title)}
           </Text>
         </Box>
         {time && (
@@ -78,7 +78,7 @@ const ChatRow = memo(function ChatRow({
           ) : draftText !== undefined ? (
             <Text wrap="truncate">
               <Text color="yellow">✎ Draft: </Text>
-              <Text dimColor>{draftText}</Text>
+              <Text dimColor>{flattenLines(draftText)}</Text>
             </Text>
           ) : (
             <Text dimColor wrap="truncate">

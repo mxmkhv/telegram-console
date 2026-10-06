@@ -28,6 +28,8 @@ import { describeError } from "./utils/describeError";
 import { withTimeout } from "./utils/withTimeout";
 
 const DELIVERY_TIMEOUT_MS = 30_000;
+// A stalled load turns into the error state, which Ctrl+R can retry
+const LOAD_TIMEOUT_MS = 30_000;
 const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
 import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
@@ -189,7 +191,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const loadMessages = async () => {
       let messages: Message[];
       try {
-        messages = await telegramService.getMessages(chatId);
+        messages = await withTimeout(telegramService.getMessages(chatId), LOAD_TIMEOUT_MS, "no response from Telegram");
       } catch (err) {
         if (cancelled) return;
         const title = stateRef.current.chats.find((c) => c.id === chatId)?.title ?? "this chat";

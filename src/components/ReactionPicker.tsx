@@ -36,8 +36,9 @@ function ReactionPickerInner({
     { isActive }
   );
 
+  // One row, always: the message it replaces was counted as at least one
   return (
-    <Box>
+    <Box height={1} overflow="hidden">
       {emojis.map((emoji, index) => (
         <Text key={emoji} inverse={index === selectedIndex}>
           {" "}{emoji}{" "}

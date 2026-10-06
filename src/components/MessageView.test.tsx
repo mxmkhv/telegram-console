@@ -582,3 +582,80 @@ describe("MessageView load-older row", () => {
   });
 });
 
+describe("MessageView review regressions", () => {
+  const msg = (id: number, overrides: Partial<Message> = {}): Message => ({
+    id,
+    senderId: `user${id}`,
+    senderName: "Alice",
+    text: `message ${id}`,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+    ...overrides,
+  });
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Group"
+      messages={[]}
+      selectedIndex={0}
+      width={40}
+      height={12}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+
+  it("Ctrl+R and Ctrl+K don't also react or move the selection", async () => {
+    const actions: string[] = [];
+    const moves: number[] = [];
+    const messages = [msg(1), msg(2), msg(3)];
+    const { stdin } = renderWithProvider(
+      view({
+        messages,
+        selectedIndex: 2,
+        dispatch: (action) => actions.push(action.type),
+        setSelectedIndex: (index) => moves.push(index),
+      }),
+    );
+    stdin.write("\x12");
+    stdin.write("\x0b");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(actions).not.toContain("SET_REACTION_OVERLAY");
+    expect(moves).toEqual([]);
+  });
+
+  it("long bubble names and reply names stay on one row", () => {
+    const longName = "Alexander Konstantinopoulos-Smithson";
+    const messages = Array.from({ length: 6 }, (_, i) =>
+      msg(i + 1, { senderName: longName, replyToMsgId: i || undefined, replyToSenderName: longName }),
+    );
+    const frame =
+      renderWithProvider(
+        view({ messages, selectedIndex: 5, width: 30, messageLayout: "bubble", isGroupChat: true }),
+      ).lastFrame() ?? "";
+    expect(frame).toMatch(/↑ \d+ earlier/);
+    expect(frame).toContain("message 6");
+  });
+
+  it("shows the start of a message taller than the panel", () => {
+    const tall = msg(2, { text: Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n") });
+    const frame = renderWithProvider(view({ messages: [msg(1), tall], selectedIndex: 1 })).lastFrame() ?? "";
+    expect(frame).toContain("Alice: line 1");
+  });
+
+  it("renders tabs as spaces so lines stay inside the border", () => {
+    const frame =
+      renderWithProvider(view({ messages: [msg(1, { text: "a\tb" })], selectedIndex: 0 })).lastFrame() ?? "";
+    expect(frame).toContain("a    b");
+    expect(frame).not.toContain("\t");
+  });
+});
+

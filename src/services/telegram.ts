@@ -297,7 +297,8 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           unreadCount: d.unreadCount ?? 0,
           isGroup: d.isGroup ?? false,
           // getDialogs attaches each message's sender, so this needs no extra request
-          lastMessage: d.message ? toMessage(d.message, d.message.sender as GramJSSender | undefined) : undefined,
+          // MessageEmpty has no date (or anything else worth previewing)
+          lastMessage: d.message?.date ? toMessage(d.message, d.message.sender as GramJSSender | undefined) : undefined,
         }));
     },
 

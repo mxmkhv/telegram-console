@@ -226,5 +226,30 @@ describe("ChatList", () => {
       for (const line of lines) expect(Bun.stringWidth(line)).toBe(width);
     });
   }
+
+  it("keeps a multiline draft on its own row", () => {
+    const chats = [
+      { id: "1", title: "Alice", unreadCount: 0, isGroup: false },
+      { id: "2", title: "Bob", unreadCount: 2, isGroup: false },
+    ];
+    const draft = { text: "line one\nline two", replyTo: null, editing: null };
+    const frame =
+      render(
+        <ChatList
+          status="ready"
+          chats={chats}
+          selectedChatId={null}
+          onSelectChat={() => {}}
+          selectedIndex={0}
+          isFocused={false}
+          height={14}
+          drafts={{ "1": draft }}
+        />
+      ).lastFrame() ?? "";
+    const lines = frame.split("\n");
+    expect(lines).toHaveLength(14);
+    expect(frame).toContain("✎ Draft: line one line two");
+    expect(lines.find((l) => l.includes("Bob"))).toContain("Bob");
+  });
 });
 

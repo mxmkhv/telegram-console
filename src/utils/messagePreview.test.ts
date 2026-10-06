@@ -29,4 +29,9 @@ describe("getMessagePreview", () => {
     expect(getMessagePreview(msg({ media: { type: "sticker", emoji: "😂", _message } }), false)).toBe("😂 Sticker");
     expect(getMessagePreview(msg({ text: "look", media: { type: "photo", _message } }), false)).toBe("look");
   });
+
+  it("never leaves a bare sender prefix", () => {
+    expect(getMessagePreview(msg({ text: "" }), true)).toBe("Alice: Message");
+  });
 });
+

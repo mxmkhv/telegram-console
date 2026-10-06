@@ -547,3 +547,49 @@ describe("appReducer delivery", () => {
     expect(appReducer(second, { type: "CLEAR_NOTICE", payload: { id: second.notice!.id } }).notice).toBeNull();
   });
 });
+
+describe("chat list preview", () => {
+  const msg = (id: number, text: string): Message => ({
+    id,
+    senderId: "u1",
+    senderName: "Alice",
+    text,
+    timestamp: new Date(),
+    isOutgoing: false,
+  });
+  const withChat = (lastMessage: Message) => ({
+    ...initialState,
+    chats: [{ id: "1", title: "Alice", unreadCount: 0, isGroup: false, lastMessage }],
+  });
+
+  it("refreshes to a newer message found on load", () => {
+    const state = appReducer(withChat(msg(5, "old")), {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [msg(5, "old"), msg(9, "missed while away")] },
+    });
+    expect(state.chats[0]!.lastMessage?.text).toBe("missed while away");
+  });
+
+  it("keeps a pending send as the preview until it's confirmed", () => {
+    const state = appReducer(withChat(msg(-1, "sending")), {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [msg(9, "older")] },
+    });
+    expect(state.chats[0]!.lastMessage?.text).toBe("sending");
+  });
+
+  it("follows an edit of the last message, and leaves the list alone otherwise", () => {
+    const start = { ...withChat(msg(9, "hi")), messages: { "1": [msg(8, "earlier"), msg(9, "hi")] } };
+    const edited = appReducer(start, {
+      type: "UPDATE_MESSAGE",
+      payload: { chatId: "1", messageId: 9, newText: "hi!", delivery: undefined },
+    });
+    expect(edited.chats[0]!.lastMessage?.text).toBe("hi!");
+
+    const other = appReducer(start, {
+      type: "UPDATE_MESSAGE",
+      payload: { chatId: "1", messageId: 8, newText: "earlier!", delivery: undefined },
+    });
+    expect(other.chats).toBe(start.chats);
+  });
+});

@@ -82,6 +82,12 @@ function hasUserReaction(reactions: Message["reactions"]): boolean {
 
 const CONTINUATION_INDENT = "        ";
 
+// Ink measures a tab as 0 columns but the terminal expands it, which would
+// spill past the border, so render tabs as spaces
+function splitLines(text: string): string[] {
+  return text.replace(/\t/g, "    ").split("\n");
+}
+
 // A classic first line's pieces, in render order. They're styled separately,
 // but Ink wraps them as one string, so counting joins them the same way.
 function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
@@ -100,7 +106,7 @@ function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
 }
 
 function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: number): number {
-  const [first = "", ...rest] = msg.text.split("\n");
+  const [first = "", ...rest] = splitLines(msg.text);
   const firstLine = Object.values(getClassicFirstLine(msg, first, isSelected)).join("");
   return rest.reduce(
     (rows, line) => rows + countWrappedLines(CONTINUATION_INDENT + line, availableWidth),
@@ -112,8 +118,9 @@ function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: 
 function getBubbleContent(msg: Message, isSelected: boolean) {
   const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
   const viewHint = isSelected && msg.media ? " [Enter]" : "";
-  const lines = (msg.text ? msg.text.split("\n") : [""]).map((line, i) =>
-    i === 0 && mediaInfo ? `${line} ${mediaInfo}${viewHint}`.trim() : line,
+  const lines = splitLines(msg.text).map((line, i) =>
+    // A blank line still takes its counted row
+    i === 0 && mediaInfo ? `${line} ${mediaInfo}${viewHint}`.trim() : line || " ",
   );
   const suffix = {
     timestamp: ` [${formatTime(msg.timestamp)}]`,
@@ -216,6 +223,8 @@ function MessageViewInner({
   // Message keys: moving the selection, 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
   useInput(
     (input, key) => {
+      // Ctrl/Alt chords arrive as their letter (Ctrl+R as "r"): they belong to App
+      if (key.ctrl || key.meta) return;
       const moveTo = (index: number) => {
         if (chatMessages.length > 0) setSelectedIndex?.(Math.max(0, Math.min(chatMessages.length - 1, index)));
       };
@@ -420,7 +429,7 @@ function MessageViewInner({
   }, [messageLineCounts]);
 
   // Calculate visible window based on LINES, not message count
-  const { startIndex, endIndex, showScrollUp, showScrollDown } = useMemo(() => {
+  const { startIndex, endIndex, showScrollUp, showScrollDown, allFit, overflows } = useMemo(() => {
     const total = chatMessages.length;
     if (total === 0) {
       return {
@@ -428,6 +437,8 @@ function MessageViewInner({
         endIndex: 0,
         showScrollUp: false,
         showScrollDown: false,
+        allFit: true,
+        overflows: false,
       };
     }
 
@@ -442,6 +453,8 @@ function MessageViewInner({
         endIndex: total,
         showScrollUp: false,
         showScrollDown: false,
+        allFit: true,
+        overflows: false,
       };
     }
 
@@ -498,11 +511,15 @@ function MessageViewInner({
       }
     }
 
+    const indicatorLines = olderLine + (start > 0 ? reserveTop : 0) + (end < total ? reserveBottom : 0);
     return {
       startIndex: start,
       endIndex: end,
       showScrollUp: start > 0,
       showScrollDown: end < total,
+      allFit: false,
+      // Only when the selected message alone is taller than the panel
+      overflows: linesUsed + indicatorLines > visibleLines,
     };
   }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines, isLoadingOlder, canLoadOlder]);
 
@@ -521,7 +538,7 @@ function MessageViewInner({
   // Render a single message in classic layout
   const renderClassicMessage = (msg: Message, isSelected: boolean) => {
     const flashColor = getFlashColor(msg.id);
-    const [first = "", ...rest] = msg.text.split("\n");
+    const [first = "", ...rest] = splitLines(msg.text);
     const firstLine = getClassicFirstLine(msg, first, isSelected);
     return (
       <Box flexDirection="column">
@@ -580,11 +597,15 @@ function MessageViewInner({
       <Box flexDirection="column">
         {/* Sender name (groups only, others only) - with unique color */}
         {showName && (
-          <Text color={colorForSender(msg.senderId)}>{msg.senderName || "Unknown"}</Text>
+          <Text color={colorForSender(msg.senderId)} wrap="truncate">
+            {msg.senderName || "Unknown"}
+          </Text>
         )}
 
         {msg.replyToMsgId && (
-          <Text dimColor>↩ {msg.replyToSenderName ?? "Unknown"}</Text>
+          <Text dimColor wrap="truncate">
+            ↩ {msg.replyToSenderName ?? "Unknown"}
+          </Text>
         )}
 
         {/* Message content with inline timestamp on last line */}
@@ -650,38 +671,64 @@ function MessageViewInner({
         borderRight={false}
         borderTop={false}
       >
-        <Text bold color={isFocused ? "cyan" : undefined}>
+        <Text bold color={isFocused ? "cyan" : undefined} wrap="truncate">
           {selectedChatTitle}
         </Text>
-        {isTyping && <Text dimColor italic> typing…</Text>}
-        {totalLines > visibleLines && (
-          <Text dimColor>
-            {" "}
-            ({selectedIndex + 1}/{chatMessages.length})
-          </Text>
+        {isTyping && (
+          <Box flexShrink={0}>
+            <Text dimColor italic>
+              {" "}typing…
+            </Text>
+          </Box>
+        )}
+        {!allFit && (
+          <Box flexShrink={0}>
+            <Text dimColor>
+              {" "}
+              ({selectedIndex + 1}/{chatMessages.length})
+            </Text>
+          </Box>
         )}
       </Box>
       {chatMessages.length === 0 ? (
-        <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center">
-          {loadStatus === "loading" && <Text dimColor>Loading messages…</Text>}
+        <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
+          {/* The hint line drops first when there's only one row */}
+          {loadStatus === "loading" && (
+            <Text dimColor wrap="truncate">
+              Loading messages…
+            </Text>
+          )}
           {loadStatus === "error" && (
             <>
-              <Text color="red">Couldn't load messages</Text>
-              <Text dimColor>Press Ctrl+R to retry</Text>
+              <Text color="red" wrap="truncate">
+                Couldn't load messages
+              </Text>
+              {visibleLines > 1 && (
+                <Text dimColor wrap="truncate">
+                  Press Ctrl+R to retry
+                </Text>
+              )}
             </>
           )}
           {loadStatus === "ready" && (
             <>
-              <Text dimColor>No messages yet</Text>
-              <Text dimColor>Say hi below</Text>
+              <Text dimColor wrap="truncate">
+                No messages yet
+              </Text>
+              {visibleLines > 1 && (
+                <Text dimColor wrap="truncate">
+                  Say hi below
+                </Text>
+              )}
             </>
           )}
         </Box>
       ) : (
       <Box
         flexDirection="column"
-        // Conversations sit on the input, like every chat app
-        justifyContent="flex-end"
+        // Conversations sit on the input, like every chat app. A message taller
+        // than the panel anchors to the top so its start stays readable.
+        justifyContent={overflows ? "flex-start" : "flex-end"}
         paddingX={1}
         height={visibleLines}
         overflowY="hidden"
