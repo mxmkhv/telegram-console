@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
+import { useInput } from "ink";
 import { MessageView, countWrappedLines } from "./MessageView";
 import { LOGO_COLS, LOGO_ROWS } from "./logoAssets";
 import { AppProvider } from "../state/context";
@@ -513,13 +514,18 @@ describe("MessageView paging", () => {
       isOutgoing: false,
     }));
     const moves: number[] = [];
-    const { stdin } = renderWithProvider(
+    function Paged() {
+      const [selectedIndex, setSelectedIndex] = React.useState(29);
+      return (
       <MessageView
         isFocused
         selectedChatTitle="Alice"
         messages={messages}
-        selectedIndex={29}
-        setSelectedIndex={(index) => moves.push(index)}
+        selectedIndex={selectedIndex}
+        setSelectedIndex={(index) => {
+          moves.push(index);
+          setSelectedIndex(index);
+        }}
         width={40}
         height={12}
         dispatch={mockDispatch}
@@ -531,14 +537,17 @@ describe("MessageView paging", () => {
         onRetryDelivery={mockRetryDelivery}
         onLoadOlder={mockLoadOlder}
         reactionOverlay={null}
-      />,
-    );
+      />
+      );
+    }
+    const { stdin } = renderWithProvider(<Paged />);
     stdin.write("\x1b[5~");
     await new Promise((r) => setTimeout(r, 30));
     stdin.write("\x1b[6~");
     await new Promise((r) => setTimeout(r, 30));
-    // 8 rows: the "↑ earlier" line + 7 messages, so a page is 6 (one message overlaps)
-    expect(moves).toEqual([23, 29]);
+    // 8 rows: the "↑ earlier" line + 7 messages, so a page is 6 (one message
+    // overlaps). Mid-list both indicators show, leaving 6 messages: a page of 5.
+    expect(moves).toEqual([23, 28]);
   });
 });
 
@@ -659,3 +668,279 @@ describe("MessageView review regressions", () => {
   });
 });
 
+
+describe("MessageView reactions", () => {
+  const messages = [1, 2, 3].map(
+    (id): Message => ({
+      id,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${id}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }),
+  );
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Alice"
+      messages={messages}
+      selectedIndex={2}
+      width={50}
+      height={20}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+
+  it("centers the full grid in place of the messages", () => {
+    const lines = renderWithProvider(view({ reactionOverlay: { kind: "modal", messageId: 3 } })).lastFrame()!.split("\n");
+    expect(lines.join("\n")).not.toContain("message 3");
+    expect(lines.join("\n")).toContain("[Cancel]");
+    // 16 rows under the header hold the 11-row grid with 3 above and 2 below,
+    // and the 28-column grid sits 10 columns in from each side
+    expect(lines.findIndex((line) => line.includes("╭", 1))).toBe(6);
+    expect(lines.findIndex((line) => line.includes("╯", 1) && !line.startsWith("╰"))).toBe(16);
+    expect(lines[6]!.indexOf("╭", 1)).toBe(11);
+    expect(lines[6]!.length - 1 - lines[6]!.lastIndexOf("╮")).toBe(11);
+  });
+
+  it("drops the title and [Cancel] when the panel is short, keeping the emoji", () => {
+    const frame = renderWithProvider(view({ height: 8, reactionOverlay: { kind: "modal", messageId: 3 } })).lastFrame()!;
+    expect(frame.split("\n")).toHaveLength(8);
+    expect(frame).not.toContain("React");
+    expect(frame).not.toContain("[Cancel]");
+    expect(frame).toContain("👍");
+  });
+
+  it("scrolls the quick picker in a narrow panel instead of wrapping it", () => {
+    const frame = renderWithProvider(view({ width: 30, reactionOverlay: { kind: "picker", messageId: 3 } })).lastFrame()!;
+    const pickerRow = frame.split("\n").find((line) => line.includes("👍"))!;
+    expect(pickerRow).toContain("›");
+    expect(frame).not.toContain("[...]");
+    expect(frame).toContain("message 2");
+  });
+});
+
+describe("MessageView tall messages", () => {
+  const msg = (id: number, text: string): Message => ({
+    id,
+    senderId: "user1",
+    senderName: "Alice",
+    text,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+  });
+  const tall = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+  const tick = () => new Promise((r) => setTimeout(r, 30));
+
+  // height 12 leaves 8 message rows: one for "↑ earlier", one for what's left below
+  function Harness({ messages, initialIndex }: { messages: Message[]; initialIndex: number }) {
+    const [selectedIndex, setSelectedIndex] = React.useState(initialIndex);
+    return (
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={selectedIndex}
+        setSelectedIndex={setSelectedIndex}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />
+    );
+  }
+
+  it("scrolls through a message taller than the panel before moving on", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, "short"), msg(2, tall)]} initialIndex={1} />);
+    // 12 lines in 6 rows: it opens at its top with 6 to go
+    expect(lastFrame()).toMatch(/line 1 /);
+    expect(lastFrame()).toContain("↓ 6 more lines");
+
+    stdin.write("j");
+    await tick();
+    expect(lastFrame()).toContain("↓ 5 more lines");
+    expect(lastFrame()).not.toMatch(/line 1 /);
+
+    stdin.write("\x1b[6~");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toContain("more lines");
+
+    for (let i = 0; i < 6; i++) {
+      stdin.write("k");
+      await tick();
+    }
+    expect(lastFrame()).toContain("↓ 6 more lines");
+    expect(lastFrame()).toContain("(2/2)");
+
+    stdin.write("k");
+    await tick();
+    expect(lastFrame()).toContain("(1/2)");
+  });
+
+  it("shows a tall message's end when stepping up into it, and its top after a jump", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, tall), msg(2, "short")]} initialIndex={1} />);
+    stdin.write("k");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toMatch(/line 1 /);
+
+    stdin.write("G");
+    await tick();
+    stdin.write("g");
+    await tick();
+    expect(lastFrame()).toMatch(/line 1 /);
+    expect(lastFrame()).toContain("↓ 6 more lines");
+  });
+
+  it("G and g reach the end and top of a long message that's already selected", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, "short"), msg(2, tall)]} initialIndex={1} />);
+    stdin.write("G");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toContain("more lines");
+  });
+
+  it("reports lines left below, so the app keeps the selection for new messages", async () => {
+    const reports: boolean[] = [];
+    const { stdin } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[msg(1, tall)]}
+        selectedIndex={0}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+        onLinesBelowChange={(linesBelow) => reports.push(linesBelow)}
+      />,
+    );
+    await tick();
+    stdin.write("G");
+    await tick();
+    expect(reports).toEqual([true, false]);
+  });
+
+  it("has nothing to scroll while the quick picker stands in for the message", () => {
+    const frame = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[msg(1, "short"), msg(2, tall)]}
+        selectedIndex={1}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={{ kind: "picker", messageId: 2 }}
+      />,
+    ).lastFrame()!;
+    expect(frame).toContain("👍");
+    expect(frame).not.toContain("more lines");
+  });
+
+  it("keeps every row whole on a panel with room for 2", () => {
+    for (const selectedIndex of [0, 1]) {
+      const frame = renderWithProvider(
+        <MessageView
+          isFocused
+          selectedChatTitle="Alice"
+          messages={[msg(1, tall), msg(2, tall)]}
+          selectedIndex={selectedIndex}
+          canLoadOlder={selectedIndex === 0}
+          width={40}
+          height={6}
+          dispatch={mockDispatch}
+          messageLayout="classic"
+          isGroupChat={false}
+          chatId="1"
+          sendReaction={mockSendReaction}
+          removeReaction={mockRemoveReaction}
+          onRetryDelivery={mockRetryDelivery}
+          onLoadOlder={mockLoadOlder}
+          reactionOverlay={null}
+        />,
+      ).lastFrame()!;
+      // The top row and one message row: no "↓ more lines" written over them
+      expect(frame.split("\n")).toHaveLength(6);
+      expect(frame).not.toContain("more line");
+      expect(frame.split("\n")[3]).toMatch(selectedIndex === 0 ? /load older/ : /1 earlier/);
+    }
+  });
+
+  it("starts at the top again in another chat with the same message ids", async () => {
+    function Switcher() {
+      const [chatId, setChatId] = React.useState("1");
+      const [selectedIndex, setSelectedIndex] = React.useState(1);
+      return (
+        <>
+          <MessageView
+            isFocused
+            selectedChatTitle="Alice"
+            messages={[msg(1, "short"), msg(2, tall)]}
+            selectedIndex={selectedIndex}
+            setSelectedIndex={setSelectedIndex}
+            width={40}
+            height={12}
+            dispatch={mockDispatch}
+            messageLayout="classic"
+            isGroupChat={false}
+            chatId={chatId}
+            sendReaction={mockSendReaction}
+            removeReaction={mockRemoveReaction}
+            onRetryDelivery={mockRetryDelivery}
+            onLoadOlder={mockLoadOlder}
+            reactionOverlay={null}
+          />
+          <SwitchOnX onSwitch={() => setChatId((id) => (id === "1" ? "2" : "1"))} />
+        </>
+      );
+    }
+    function SwitchOnX({ onSwitch }: { onSwitch: () => void }) {
+      useInput((input) => {
+        if (input === "x") onSwitch();
+      });
+      return null;
+    }
+    const { lastFrame, stdin } = renderWithProvider(<Switcher />);
+    stdin.write("G");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    stdin.write("x");
+    await tick();
+    stdin.write("x");
+    await tick();
+    expect(lastFrame()).toMatch(/line 1 /);
+  });
+});

@@ -41,6 +41,8 @@ interface MessageViewProps {
   onLoadOlder: () => void;
   reactionOverlay: ReactionOverlay;
   isTyping?: boolean;
+  /** Whether the selected message, taller than the panel, has lines below the view */
+  onLinesBelowChange?: (linesBelow: boolean) => void;
 }
 
 // Rows a line takes once Ink wraps it: Ink wraps with this same wrap-ansi call
@@ -166,6 +168,7 @@ function MessageViewInner({
   onLoadOlder,
   reactionOverlay,
   isTyping,
+  onLinesBelowChange,
 }: MessageViewProps) {
   const skin = useSkin();
   // panelDividers skins drop the left/right/outer-top/bottom border, leaving
@@ -180,6 +183,14 @@ function MessageViewInner({
     [dispatch],
   );
   const [reactionPickerIndex, setReactionPickerIndex] = useState(0);
+  // How far a message taller than the panel is scrolled; it starts at its top
+  const [messageScroll, setMessageScroll] = useState<{ messageId: number; offset: number } | null>(null);
+  // Another chat starts fresh, even if it has a message with the same id
+  const [scrollChatId, setScrollChatId] = useState(chatId);
+  if (scrollChatId !== chatId) {
+    setScrollChatId(chatId);
+    setMessageScroll(null);
+  }
   const [flashState, setFlashState] = useState<{
     messageId: number;
     color: string;
@@ -190,52 +201,31 @@ function MessageViewInner({
   const { startFlash: startIndicatorFlash, isFlashing: isIndicatorFlashing } = useFlash();
   const telegramService = useTelegramService();
 
-  // Check if user is viewing the bottom of messages
-  const isAtBottom = useMemo(() => {
-    return selectedIndex >= chatMessages.length - 1;
-  }, [selectedIndex, chatMessages.length]);
-
-  // Subscribe to new messages for this chat
-  useEffect(() => {
-    const unsub = telegramService?.onNewMessage((message, incomingChatId) => {
-      if (message.isOutgoing || incomingChatId !== chatId) return;
-
-      if (isAtBottom) {
-        startMsgFlash(message.id, FLASH_CONFIG.messageFlashCount);
-      } else {
-        // Flash the "↓ X more" indicator and increment unread count
-        startIndicatorFlash("scroll-indicator", FLASH_CONFIG.indicatorFlashCount);
-        if (chatId) {
-          dispatch({ type: "INCREMENT_UNREAD", payload: { chatId } });
-        }
-      }
-    });
-    return unsub;
-  }, [telegramService, chatId, isAtBottom, startMsgFlash, startIndicatorFlash, dispatch]);
-
-  // Clear unread count when user scrolls to bottom
-  useEffect(() => {
-    if (isAtBottom && chatId) {
-      dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
-    }
-  }, [isAtBottom, chatId, dispatch]);
-
   // Message keys: moving the selection, 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
   useInput(
     (input, key) => {
       // Ctrl/Alt chords arrive as their letter (Ctrl+R as "r"): they belong to App
       if (key.ctrl || key.meta) return;
-      const moveTo = (index: number) => {
-        if (chatMessages.length > 0) setSelectedIndex?.(Math.max(0, Math.min(chatMessages.length - 1, index)));
+      // A tall message shows its top, or its end when stepping up into it
+      const moveTo = (index: number, fromEnd = false) => {
+        const target = Math.max(0, Math.min(chatMessages.length - 1, index));
+        if (chatMessages.length === 0 || target === selectedIndex) return;
+        setMessageScroll(fromEnd ? { messageId: chatMessages[target]!.id, offset: Number.MAX_SAFE_INTEGER } : null);
+        setSelectedIndex?.(target);
       };
+      // A tall message scrolls through its own lines before the selection moves
+      const scrollTo = (offset: number) =>
+        setMessageScroll({ messageId: chatMessages[selectedIndex]!.id, offset: Math.max(0, Math.min(maxScroll, offset)) });
       // A page keeps one message of overlap for context
       const pageSize = Math.max(1, endIndex - startIndex - 1);
-      if (key.upArrow || input === "k") return moveTo(selectedIndex - 1);
-      if (key.downArrow || input === "j") return moveTo(selectedIndex + 1);
-      if (key.pageUp) return moveTo(selectedIndex - pageSize);
-      if (key.pageDown) return moveTo(selectedIndex + pageSize);
-      if (key.home || input === "g") return moveTo(0);
-      if (key.end || input === "G") return moveTo(chatMessages.length - 1);
+      const linePage = Math.max(1, tallRows - 1);
+      if (key.upArrow || input === "k") return scrollOffset > 0 ? scrollTo(scrollOffset - 1) : moveTo(selectedIndex - 1, true);
+      if (key.downArrow || input === "j") return scrollOffset < maxScroll ? scrollTo(scrollOffset + 1) : moveTo(selectedIndex + 1);
+      if (key.pageUp) return scrollOffset > 0 ? scrollTo(scrollOffset - linePage) : moveTo(selectedIndex - pageSize, true);
+      if (key.pageDown) return scrollOffset < maxScroll ? scrollTo(scrollOffset + linePage) : moveTo(selectedIndex + pageSize);
+      // Already there: to the top or end of a long message
+      if (key.home || input === "g") return selectedIndex === 0 ? scrollTo(0) : moveTo(0);
+      if (key.end || input === "G") return selectedIndex === chatMessages.length - 1 ? scrollTo(maxScroll) : moveTo(chatMessages.length - 1);
 
       // Shift+R for reply (uppercase R)
       if (input === "R") {
@@ -292,7 +282,7 @@ function MessageViewInner({
             (m) => m.id === selectedMessage.replyToMsgId
           );
           if (originalIndex >= 0) {
-            setSelectedIndex(originalIndex);
+            moveTo(originalIndex);
             startMsgFlash(selectedMessage.replyToMsgId, FLASH_CONFIG.messageFlashCount);
             return;
           }
@@ -526,6 +516,54 @@ function MessageViewInner({
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
 
+  // A message taller than the panel is shown alone and scrolls inside its
+  // own rows, with the top row for what's above and the bottom for what's left
+  const topRow = isLoadingOlder || canLoadOlder || showScrollUp ? 1 : 0;
+  // A panel too short for the bottom row gives it to the message
+  const bottomRow = visibleLines - topRow >= 2 ? 1 : 0;
+  const tallRows = Math.max(1, visibleLines - topRow - bottomRow);
+  // The quick picker takes the message's place, so there's nothing to scroll
+  const maxScroll = overflows && !reactionPickerOpen ? Math.max(0, messageLineCounts[selectedIndex]! - tallRows) : 0;
+  const scrollOffset =
+    messageScroll && messageScroll.messageId === chatMessages[selectedIndex]?.id
+      ? Math.min(messageScroll.offset, maxScroll)
+      : 0;
+  const linesBelow = maxScroll - scrollOffset;
+
+  // The app keeps the selection put for new messages while a long one is being read
+  useEffect(() => {
+    onLinesBelowChange?.(linesBelow > 0);
+  }, [linesBelow, onLinesBelowChange]);
+
+  // Check if user is viewing the bottom of messages
+  const isAtBottom = selectedIndex >= chatMessages.length - 1 && linesBelow === 0;
+
+  // Subscribe to new messages for this chat
+  useEffect(() => {
+    const unsub = telegramService?.onNewMessage((message, incomingChatId) => {
+      if (message.isOutgoing || incomingChatId !== chatId) return;
+
+      if (isAtBottom) {
+        startMsgFlash(message.id, FLASH_CONFIG.messageFlashCount);
+      } else {
+        // Flash the "↓ X more" indicator and increment unread count
+        startIndicatorFlash("scroll-indicator", FLASH_CONFIG.indicatorFlashCount);
+        if (chatId) {
+          dispatch({ type: "INCREMENT_UNREAD", payload: { chatId } });
+        }
+      }
+    });
+    return unsub;
+  }, [telegramService, chatId, isAtBottom, startMsgFlash, startIndicatorFlash, dispatch]);
+
+  // Clear unread count when user scrolls to bottom
+  useEffect(() => {
+    if (isAtBottom && chatId) {
+      dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
+    }
+  }, [isAtBottom, chatId, dispatch]);
+
+
   const colorForSender = (senderId: string) =>
     senderColors?.[senderId] ?? getSenderColor(senderId);
 
@@ -634,6 +672,37 @@ function MessageViewInner({
     );
   };
 
+  // A message with its day label, or the quick picker in its place
+  const renderEntry = (msg: Message, index: number) => {
+    const isSelected = index === selectedIndex && isFocused;
+    const daySeparator = daySeparators[index];
+    return (
+      <Box key={msg.id} flexDirection="column" flexShrink={0}>
+        {daySeparator && (
+          <Box justifyContent="center">
+            <Text dimColor wrap="truncate">
+              ── {daySeparator} ──
+            </Text>
+          </Box>
+        )}
+        {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
+          <ReactionPicker
+            emojis={QUICK_EMOJIS}
+            selectedIndex={reactionPickerIndex}
+            onSelect={handleSendReaction}
+            onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+            onCancel={() => setReactionOverlay(null)}
+            width={contentWidth}
+          />
+        ) : messageLayout === "bubble" ? (
+          renderBubbleMessage(msg, isSelected)
+        ) : (
+          renderClassicMessage(msg, isSelected)
+        )}
+      </Box>
+    );
+  };
+
   if (!selectedChatTitle) {
     // Room for the logo plus the border, gap and hint, with breathing space around it.
     const fitsLogo = (height === undefined || height >= LOGO_ROWS + 6) && width >= LOGO_COLS + 6;
@@ -690,7 +759,17 @@ function MessageViewInner({
           </Box>
         )}
       </Box>
-      {chatMessages.length === 0 ? (
+      {reactionModalOpen ? (
+        // Takes the place of the messages, so nothing shows through it
+        <Box height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
+          <ReactionModal
+            onSelect={handleSendReaction}
+            onCancel={() => setReactionOverlay(null)}
+            width={width - (skin.panelDividers ? 0 : 2)}
+            height={visibleLines}
+          />
+        </Box>
+      ) : chatMessages.length === 0 ? (
         <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
           {/* The hint line drops first when there's only one row */}
           {loadStatus === "loading" && (
@@ -748,49 +827,29 @@ function MessageViewInner({
             {" "}↑ {startIndex} earlier
           </Text>
         )}
-        {visibleMessages.map((msg, i) => {
-          const actualIndex = startIndex + i;
-          const isSelected = actualIndex === selectedIndex && isFocused;
-          const daySeparator = daySeparators[actualIndex];
-          return (
-            <Box key={msg.id} flexDirection="column" flexShrink={0}>
-              {daySeparator && (
-                <Box justifyContent="center">
-                  <Text dimColor wrap="truncate">
-                    ── {daySeparator} ──
-                  </Text>
-                </Box>
-              )}
-              {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
-                <ReactionPicker
-                  emojis={QUICK_EMOJIS}
-                  selectedIndex={reactionPickerIndex}
-                  onSelect={handleSendReaction}
-                  onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
-                  onCancel={() => setReactionOverlay(null)}
-                />
-              ) : messageLayout === "bubble" ? (
-                renderBubbleMessage(msg, isSelected)
-              ) : (
-                renderClassicMessage(msg, isSelected)
-              )}
+        {overflows ? (
+          <Box height={tallRows} flexShrink={0} flexDirection="column" overflow="hidden">
+            <Box marginTop={-scrollOffset} flexDirection="column" flexShrink={0}>
+              {renderEntry(chatMessages[selectedIndex]!, selectedIndex)}
             </Box>
-          );
-        })}
-        {showScrollDown && (
+          </Box>
+        ) : (
+          visibleMessages.map((msg, i) => renderEntry(msg, startIndex + i))
+        )}
+        {linesBelow > 0 && bottomRow ? (
+          <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
+            {" "}↓ {linesBelow} more {linesBelow === 1 ? "line" : "lines"}
+          </Text>
+        ) : overflows && bottomRow && !showScrollDown ? (
+          // Keeps the bottom row the message was laid out around
+          <Text> </Text>
+        ) : null}
+        {showScrollDown && linesBelow === 0 && (!overflows || bottomRow) && (
           <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
             {" "}↓ {chatMessages.length - endIndex} more
           </Text>
         )}
       </Box>
-      )}
-      {reactionModalOpen && (
-        <Box position="absolute" marginTop={5} marginLeft={10}>
-          <ReactionModal
-            onSelect={handleSendReaction}
-            onCancel={() => setReactionOverlay(null)}
-          />
-        </Box>
       )}
     </Box>
   );

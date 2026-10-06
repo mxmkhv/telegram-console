@@ -113,9 +113,8 @@ export function transformEmoticons(
     searchText = textBeforeCursor.slice(0, -1);
   }
 
-  // Find the start of the last word
-  const lastSpaceIndex = searchText.lastIndexOf(" ");
-  const wordStart = lastSpaceIndex === -1 ? 0 : lastSpaceIndex + 1;
+  // Find the start of the last word, which may begin a new line
+  const wordStart = Math.max(searchText.lastIndexOf(" "), searchText.lastIndexOf("\n")) + 1;
   const word = searchText.slice(wordStart);
 
   // Check if word matches an emoticon (O(1) lookup)

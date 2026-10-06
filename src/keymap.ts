@@ -50,7 +50,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
   messages: {
     title: "Messages",
     bindings: [
-      { keys: ["↑↓", "j/k"], action: "Select a message" },
+      { keys: ["↑↓", "j/k"], action: "Select, or read on in a long one" },
       { keys: ["PgUp", "PgDn"], action: "Page up / down" },
       { keys: ["g", "Home"], action: "Oldest loaded message" },
       { keys: ["G", "End"], action: "Newest message" },
@@ -67,11 +67,13 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
     title: "Typing",
     bindings: [
       { keys: ["Enter"], action: "Send", hint: "send" },
+      { keys: ["Alt+Enter", "^J"], action: "New line", hint: "new line" },
       { keys: ["↑"], action: "Edit last message (empty input)", hint: "edit last" },
+      { keys: ["↑↓"], action: "Move between lines" },
       { keys: ["^X"], action: "Cancel reply or edit", hint: "cancel" },
       { keys: ["^V"], action: "Send the image on the clipboard", hint: "image" },
       { keys: ["^A", "^E"], action: "Jump to start / end" },
-      { keys: ["Esc"], action: "Leave the input; draft is kept", hint: "leave" },
+      { keys: ["Esc", "Tab"], action: "Leave the input; draft is kept", hint: "leave" },
     ],
   },
   reactions: {

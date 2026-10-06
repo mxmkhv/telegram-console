@@ -430,7 +430,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   const isMinimal = state.uiMode === "minimal";
   const overlayOpen = isOverlayOpen(state);
   const modeIndicatorVisible = !!(state.replyingToMessage || state.editingMessage);
-  const inputReserved = 3 + (modeIndicatorVisible ? 1 : 0) + (state.notice ? 1 : 0);
+  // A long draft grows the input up to MAX_INPUT_ROWS, and the panels give way
+  const [inputRows, setInputRows] = useState(1);
+  const inputReserved = 2 + inputRows + (modeIndicatorVisible ? 1 : 0) + (state.notice ? 1 : 0);
   // panelDividers skins replace HeaderBar/StatusBar's round border (2 rows)
   // with a single 1-row rule, so each panel is 1 row shorter.
   const panelRows = getSkin(state.skin).panelDividers ? 2 : 3;
@@ -445,6 +447,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     terminalRows - headerReserved - statusReserved - inputReserved - connReserved - stripReserved - legendReserved,
   );
   const panelHeight = bodyHeight;
+
+  // Tab cycles panels, Shift+Tab cycles back
+  const cycleFocus = (backwards: boolean) => {
+    const order: FocusedPanel[] = isMinimal ? ["chatList", "messages", "input"] : ["header", "chatList", "messages", "input"];
+    const current = order.indexOf(state.focusedPanel);
+    if (current < 0) return;
+    const next = order[(current + (backwards ? -1 : 1) + order.length) % order.length]!;
+    dispatch({ type: "SET_FOCUSED_PANEL", payload: next });
+  };
 
   // Panel navigation and global keys (disabled when input is focused to not interfere with TextInput)
   useInput(
@@ -475,14 +486,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      // Tab cycles panels, Shift+Tab cycles back
       if (key.tab) {
-        const order: FocusedPanel[] = isMinimal ? ["chatList", "messages", "input"] : ["header", "chatList", "messages", "input"];
-        const current = order.indexOf(state.focusedPanel);
-        if (current >= 0) {
-          const next = order[(current + (key.shift ? -1 : 1) + order.length) % order.length]!;
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: next });
-        }
+        cycleFocus(key.shift);
         return;
       }
 
@@ -572,12 +577,14 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     { isActive: state.focusedPanel !== "input" && !state.isHidden }
   );
 
-  // Escape to exit input mode (only active when input is focused)
+  // Leaving the input (only active when input is focused); the draft stays
   useInput(
     (input, key) => {
       if (overlayOpen) return;
       if (key.escape) {
         dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
+      } else if (key.tab) {
+        cycleFocus(key.shift);
       } else if (key.ctrl && input === "r" && canRetry) {
         retry();
       } else if (key.ctrl && input === "k") {
@@ -618,6 +625,12 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     }
   }, [currentMessages, dispatch]);
 
+  // Set while the last message is taller than the panel and not read to its end
+  const readingLongMessage = useRef(false);
+  const handleLinesBelowChange = useCallback((linesBelow: boolean) => {
+    readingLongMessage.current = linesBelow;
+  }, []);
+
   // Reset message index to last message when chat changes or messages load
   // Track message counts per-chat to handle switching between chats correctly
   const prevChatIdRef = React.useRef<string | null>(null);
@@ -637,7 +650,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const newMessageAdded = currentCount === prevCount + 1;
     // Only auto-scroll to new message if user was already at the bottom, and
     // not while a reaction picker is open on the current message
-    const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
+    const wasAtBottom = prevCount === 0 || (messageIndex >= prevCount - 1 && !readingLongMessage.current);
     const shouldScrollToNew = newMessageAdded && wasAtBottom && !state.reactionOverlay;
 
     if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
@@ -819,6 +832,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 onLoadOlder={loadOlderMessages}
                 reactionOverlay={state.reactionOverlay}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
+                onLinesBelowChange={handleLinesBelowChange}
               />
             </Box>
             {isMinimal && state.connectionState !== "connected" && (
@@ -844,6 +858,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
               editingMessage={state.editingMessage}
               onCancelReply={handleCancelReply}
               onCancelEdit={handleCancelEdit}
+              width={terminalWidth}
+              rows={inputRows}
+              onRowsChange={setInputRows}
             />
             <ShortcutsBar width={terminalWidth} isTyping={isInputFocused} />
           </>

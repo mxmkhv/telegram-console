@@ -543,5 +543,50 @@ describe("MainApp navigation keys", () => {
     await press(stdin, "\x1b[Z");
     expect(lastFrame()).toMatch(/\] Typing/);
   });
+
+  it("Tab and Shift+Tab leave the input and keep the draft", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    await press(stdin, "\r", "draft");
+    expect(lastFrame()).toMatch(/\] Typing/);
+
+    await press(stdin, "\t");
+    expect(lastFrame()).toMatch(/\] Header/);
+
+    await press(stdin, "\x1b[Z", "\x1b[Z");
+    expect(lastFrame()).toMatch(/\] Messages/);
+    expect(lastFrame()).toContain("> draft");
+  });
+
+  it("a new message leaves the selection on a long message that's still being read", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    const longText = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n");
+    await press(stdin, "\r", longText, "\r", "\x1b");
+    expect(lastFrame()).toContain("(9/9)");
+    expect(lastFrame()).toContain("more lines");
+
+    svc.simulateIncomingMessage("1", "ping");
+    await wait();
+    expect(lastFrame()).toContain("(9/10)");
+    expect(lastFrame()).toContain("more lines");
+  });
+
+  it("a long draft grows the input to 4 rows without pushing the header off", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    await press(stdin, "\r");
+    const height = lastFrame()!.split("\n").length;
+
+    await press(stdin, "1\n2\n3\n4\n5\n6");
+    const frame = lastFrame()!;
+    expect(frame.split("\n").length).toBe(height);
+    expect(frame).toContain("telegram-console");
+    expect(frame).toMatch(/│ {3}6/);
+    expect(frame).not.toMatch(/│ {3}2/);
+
+    await press(stdin, "\r");
+    expect(lastFrame()!.split("\n").length).toBe(height);
+  });
 });
 

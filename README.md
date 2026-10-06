@@ -99,7 +99,7 @@ Press `?` in the app for the full list. `^` means Ctrl.
 
 | Key           | Action                             |
 | ------------- | ---------------------------------- |
-| `↑↓` `j/k`    | Select a message                   |
+| `↑↓` `j/k`    | Select, or read on in a long one   |
 | `PgUp` `PgDn` | Page up / down                     |
 | `g` `Home`    | Oldest loaded message              |
 | `G` `End`     | Newest message                     |
@@ -113,14 +113,16 @@ Press `?` in the app for the full list. `^` means Ctrl.
 
 #### Typing
 
-| Key       | Action                          |
-| --------- | ------------------------------- |
-| `Enter`   | Send                            |
-| `↑`       | Edit last message (empty input) |
-| `^X`      | Cancel reply or edit            |
-| `^V`      | Send the image on the clipboard |
-| `^A` `^E` | Jump to start / end             |
-| `Esc`     | Leave the input; draft is kept  |
+| Key              | Action                          |
+| ---------------- | ------------------------------- |
+| `Enter`          | Send                            |
+| `Alt+Enter` `^J` | New line                        |
+| `↑`              | Edit last message (empty input) |
+| `↑↓`             | Move between lines              |
+| `^X`             | Cancel reply or edit            |
+| `^V`             | Send the image on the clipboard |
+| `^A` `^E`        | Jump to start / end             |
+| `Esc` `Tab`      | Leave the input; draft is kept  |
 
 #### Reactions
 
