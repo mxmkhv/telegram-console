@@ -7,14 +7,15 @@ const NOTICE_DURATION_MS = 6000;
 interface NoticeLineProps {
   notice: Notice | null;
   onExpire: (id: number) => void;
+  durationMs?: number;
 }
 
-function NoticeLineInner({ notice, onExpire }: NoticeLineProps) {
+function NoticeLineInner({ notice, onExpire, durationMs = NOTICE_DURATION_MS }: NoticeLineProps) {
   useEffect(() => {
     if (!notice || notice.sticky) return;
-    const timer = setTimeout(() => onExpire(notice.id), NOTICE_DURATION_MS);
+    const timer = setTimeout(() => onExpire(notice.id), durationMs);
     return () => clearTimeout(timer);
-  }, [notice, onExpire]);
+  }, [notice, onExpire, durationMs]);
 
   if (!notice) return null;
 

@@ -509,6 +509,24 @@ describe("appReducer delivery", () => {
     expect(state.messages["1"]!.map((m) => [m.id, m.text])).toEqual([[1, "hi"], [2, "new"], [-1, "hi"]]);
   });
 
+  it("SET_MESSAGES puts unconfirmed edits outside the page before it", () => {
+    const failedEdit: Message = { ...sent(2, "new"), delivery: { action: "edit", status: "failed", originalText: "old" } };
+    const state = appReducer(withMessages([failedEdit]), {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [sent(50), sent(51)] },
+    });
+    expect(state.messages["1"]!.map((m) => m.id)).toEqual([2, 50, 51]);
+  });
+
+  it("SET_DELIVERY ignores results for an older edit", () => {
+    const pendingEdit: Message = { ...sent(2, "second"), delivery: { action: "edit", status: "pending", originalText: "first" } };
+    const state = appReducer(withMessages([pendingEdit]), {
+      type: "SET_DELIVERY",
+      payload: { chatId: "1", messageId: 2, text: "first-edit", delivery: { action: "edit", status: "failed", originalText: "first" } },
+    });
+    expect(state.messages["1"]![0]!.delivery?.status).toBe("pending");
+  });
+
   it("DISCARD_UNSENT removes a failed send", () => {
     const failed: Message = { ...sent(-1), delivery: { action: "send", status: "failed" } };
     const state = appReducer(withMessages([sent(1), failed]), { type: "DISCARD_UNSENT", payload: { chatId: "1", messageId: -1 } });

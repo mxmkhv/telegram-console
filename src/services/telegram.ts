@@ -199,11 +199,18 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
 
     async connect() {
       setConnectionState("connecting");
+      // GramJS resolves false (instead of throwing) once its retries run out,
+      // and also when already connected
+      let connected: boolean;
       try {
-        await client.connect();
+        connected = (await client.connect()) || !!client.connected;
       } catch (err) {
         setConnectionState("disconnected");
         throw err;
+      }
+      if (!connected) {
+        setConnectionState("disconnected");
+        throw new Error("Couldn't reach Telegram servers. Check your network connection");
       }
       setConnectionState("connected");
       onSessionUpdate?.(String(client.session.save()));

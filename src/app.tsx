@@ -22,6 +22,10 @@ import { BlankScreen } from "./components/BlankScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NoticeLine } from "./components/NoticeLine";
 import { describeError } from "./utils/describeError";
+import { withTimeout } from "./utils/withTimeout";
+
+const DELIVERY_TIMEOUT_MS = 30_000;
+const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
 import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
 import { createTelegramService } from "./services/telegram";
@@ -172,12 +176,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     if (!state.selectedChatId) return;
 
     const chatId = state.selectedChatId;
+    let cancelled = false;
     const loadMessages = async () => {
       let messages: Message[];
       try {
         messages = await telegramService.getMessages(chatId);
       } catch (err) {
-        showError(`Couldn't load messages: switch to another chat and back to retry (${describeError(err)})`);
+        if (cancelled) return;
+        const title = stateRef.current.chats.find((c) => c.id === chatId)?.title ?? "this chat";
+        showError(`Couldn't load ${title}: switch to another chat and back to retry (${describeError(err)})`);
         return;
       }
       dispatch({
@@ -197,6 +204,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     };
 
     void loadMessages();
+    return () => {
+      cancelled = true;
+    };
   }, [state.selectedChatId, telegramService, dispatch, showError]);
 
   // Focus media panel when it opens
@@ -218,17 +228,16 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   const deliverSend = useCallback(
     async (chatId: string, local: Message) => {
       try {
-        const message = await telegramService.sendMessage(
-          chatId,
-          local.text,
-          local.replyToMsgId,
-          local.replyToSenderName
+        const message = await withTimeout(
+          telegramService.sendMessage(chatId, local.text, local.replyToMsgId, local.replyToSenderName),
+          DELIVERY_TIMEOUT_MS,
+          DELIVERY_TIMEOUT_REASON
         );
         dispatch({ type: "CONFIRM_MESSAGE", payload: { chatId, localId: local.id, message } });
       } catch (err) {
         dispatch({
           type: "SET_DELIVERY",
-          payload: { chatId, messageId: local.id, delivery: { action: "send", status: "failed" } },
+          payload: { chatId, messageId: local.id, text: local.text, delivery: { action: "send", status: "failed" } },
         });
         showError(`Message not sent: Esc, then Enter on it to retry or x to discard (${describeError(err)})`);
       }
@@ -239,12 +248,16 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   const deliverEdit = useCallback(
     async (chatId: string, messageId: number, text: string, originalText: string) => {
       try {
-        await telegramService.editMessage(chatId, messageId, text);
-        dispatch({ type: "SET_DELIVERY", payload: { chatId, messageId, delivery: undefined } });
+        await withTimeout(
+          telegramService.editMessage(chatId, messageId, text),
+          DELIVERY_TIMEOUT_MS,
+          DELIVERY_TIMEOUT_REASON
+        );
+        dispatch({ type: "SET_DELIVERY", payload: { chatId, messageId, text, delivery: undefined } });
       } catch (err) {
         dispatch({
           type: "SET_DELIVERY",
-          payload: { chatId, messageId, delivery: { action: "edit", status: "failed", originalText } },
+          payload: { chatId, messageId, text, delivery: { action: "edit", status: "failed", originalText } },
         });
         showError(`Edit not saved: Esc, then Enter on it to retry or x to undo (${describeError(err)})`);
       }
@@ -282,7 +295,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       dispatch({ type: "CLEAR_NOTICE" });
       dispatch({
         type: "SET_DELIVERY",
-        payload: { chatId, messageId: message.id, delivery: { ...delivery, status: "pending" } },
+        payload: { chatId, messageId: message.id, text: message.text, delivery: { ...delivery, status: "pending" } },
       });
       if (delivery.action === "send") {
         void deliverSend(chatId, message);
@@ -318,7 +331,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   const handleEditMessage = useCallback(
     (text: string, chatId: string, messageId: number) => {
       const message = stateRef.current.messages[chatId]?.find((m) => m.id === messageId);
-      if (!message) return;
+      if (!message) {
+        showError("Edit not saved: the message is no longer loaded. Reopen the chat and try again");
+        return;
+      }
       // Re-editing an unsaved edit keeps the text Telegram actually has
       const originalText =
         message.delivery?.action === "edit" ? message.delivery.originalText : message.text;
@@ -333,7 +349,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       });
       void deliverEdit(chatId, messageId, text, originalText);
     },
-    [dispatch, deliverEdit]
+    [dispatch, deliverEdit, showError]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -498,6 +514,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         } else if (key.leftArrow) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         } else if (key.return) {
+          // MessageView retries failed messages on Enter
+          if (currentMessages[messageIndex]?.delivery?.status === "failed") return;
           // If at top and can load older, load them; otherwise go to input
           if (canLoadOlder) {
             loadOlderMessages();
@@ -594,13 +612,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {
     const chatId = state.selectedChatId;
-    if (!chatId || currentMessages.length === 0) return false;
+    const oldest = currentMessages[0];
+    // Paging needs a server id; unsent messages only have a negative local one
+    if (!chatId || !oldest || oldest.id < 0) return false;
     return (
       messageIndex === 0 &&
       state.hasMoreMessages[chatId] !== false &&
       !state.loadingOlderMessages[chatId]
     );
-  }, [messageIndex, state.selectedChatId, currentMessages.length, state.hasMoreMessages, state.loadingOlderMessages]);
+  }, [messageIndex, state.selectedChatId, currentMessages, state.hasMoreMessages, state.loadingOlderMessages]);
 
   // Function to load older messages (called manually)
   const loadOlderMessages = useCallback(() => {

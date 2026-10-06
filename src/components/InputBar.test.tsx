@@ -57,6 +57,21 @@ describe("InputBar", () => {
     expect(claudeCodeFrame).not.toContain("╰");
   });
 
+  it("submits once per Enter and keeps typing after it", async () => {
+    const submitted: string[] = [];
+    const { stdin, lastFrame } = render(
+      <InputBar isFocused={true} onSubmit={(text) => submitted.push(text)} selectedChatId="123" />
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    stdin.write("hi");
+    await new Promise((r) => setTimeout(r, 20));
+    stdin.write("\r");
+    stdin.write("next");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(submitted).toEqual(["hi"]);
+    expect(lastFrame()).toContain("next");
+  });
+
   it("cursor stays on same line after typing first character", async () => {
     const { lastFrame, stdin } = render(
       <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" />

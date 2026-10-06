@@ -209,8 +209,19 @@ describe("MainApp failure feedback", () => {
 
     failures.send = false;
     await press(stdin, ESC, ENTER);
-    expect(lastFrame()).toContain("hello");
-    expect(lastFrame()).not.toContain("not sent");
+    const frame = lastFrame() ?? "";
+    expect(frame.match(/You: hello/g)).toHaveLength(1);
+    expect(frame).not.toContain("hello …");
+    expect(frame).not.toContain("not sent");
+  });
+
+  it("Up edits the last sent message, skipping one that failed to send", async () => {
+    failures.send = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "unsent", ENTER, UP);
+    expect(lastFrame()).toContain("> Why Jupiter?");
   });
 
   it("x discards a failed message", async () => {
@@ -218,7 +229,10 @@ describe("MainApp failure feedback", () => {
     const { lastFrame, stdin } = renderApp();
     await wait(250);
 
-    await press(stdin, ENTER, "goodbye", ENTER, ESC, "x");
+    await press(stdin, ENTER, "goodbye", ENTER, ESC);
+    expect(lastFrame()).toContain("goodbye ! not sent");
+
+    await press(stdin, "x");
     expect(lastFrame()).not.toContain("goodbye");
     expect(lastFrame()).not.toContain("Message not sent");
   });
@@ -237,6 +251,30 @@ describe("MainApp failure feedback", () => {
     await press(stdin, ESC, UP, "x");
     expect(lastFrame()).not.toContain("Why Jupiter?!");
     expect(lastFrame()).toContain("Why Jupiter?");
+  });
+
+  it("saves an edit and clears its pending mark", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, UP, "!", ENTER);
+    expect(lastFrame()).toContain("You: Why Jupiter?!");
+    expect(lastFrame()).not.toContain("Why Jupiter?! …");
+    expect(lastFrame()).not.toContain("not saved");
+  });
+
+  it("undoing a twice-failed edit restores the text Telegram has", async () => {
+    failures.edit = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    // Edit "Why Jupiter?" twice, both fail, then undo from the messages panel
+    await press(stdin, ENTER, UP, "!", ENTER, UP, "?", ENTER);
+    expect(lastFrame()).toContain("Why Jupiter?!? ! edit not saved");
+
+    await press(stdin, ESC, UP, "x");
+    expect(lastFrame()).toContain("You: Why Jupiter?");
+    expect(lastFrame()).not.toContain("Why Jupiter?!");
   });
 
   it("shows a connection error and Ctrl+R retries", async () => {
@@ -258,6 +296,6 @@ describe("MainApp failure feedback", () => {
     await wait(250);
 
     await press(stdin, ENTER);
-    expect(lastFrame()).toContain("Couldn't load messages");
+    expect(lastFrame()).toContain("Couldn't load Elon Musk");
   });
 });

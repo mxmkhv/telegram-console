@@ -66,10 +66,11 @@ export type AppAction =
   // Reply/Edit actions
   | { type: "SET_REPLYING_TO"; payload: Message | null }
   | { type: "SET_EDITING_MESSAGE"; payload: Message | null }
-  | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string; delivery?: Delivery } }
+  | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string; delivery: Delivery | undefined } }
   // Delivery of sends/edits made from this client
   | { type: "CONFIRM_MESSAGE"; payload: { chatId: string; localId: number; message: Message } }
-  | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; delivery: Delivery | undefined } }
+  // `text` is the text the result belongs to; results for an older edit are ignored
+  | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; text: string; delivery: Delivery | undefined } }
   | { type: "DISCARD_UNSENT"; payload: { chatId: string; messageId: number } }
   | { type: "SHOW_NOTICE"; payload: Omit<Notice, "id"> }
   | { type: "CLEAR_NOTICE"; payload?: { id: number } }
@@ -143,7 +144,12 @@ function keepUnconfirmed(loaded: Message[], previous: Message[] | undefined): Me
   const byId = new Map(unconfirmed.map((m) => [m.id, m]));
   const merged = loaded.map((m) => byId.get(m.id) ?? m);
   const loadedIds = new Set(loaded.map((m) => m.id));
-  return [...merged, ...unconfirmed.filter((m) => !loadedIds.has(m.id))];
+  const missing = unconfirmed.filter((m) => !loadedIds.has(m.id));
+  // Edited messages outside the loaded page are older than all of it; unsent
+  // messages are newer
+  const olderEdits = missing.filter((m) => m.delivery?.action === "edit");
+  const unsent = missing.filter((m) => m.delivery?.action === "send");
+  return [...olderEdits, ...merged, ...unsent];
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -457,8 +463,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case "SET_DELIVERY": {
-      const { chatId, messageId, delivery } = action.payload;
-      return mapMessage(state, chatId, messageId, (msg) => ({ ...msg, delivery }));
+      const { chatId, messageId, text, delivery } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => (msg.text === text ? { ...msg, delivery } : msg));
     }
 
     case "DISCARD_UNSENT": {
