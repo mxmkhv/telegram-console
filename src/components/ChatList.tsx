@@ -29,29 +29,35 @@ const ChatRow = memo(function ChatRow({
   const hasUnread = chat.unreadCount > 0;
   const unreadIndicator = hasUnread ? "● " : "  ";
   const groupIndicator = chat.isGroup ? "# " : "  ";
-  // Shorter title leaves room for the draft marker at full list width
-  const title = chat.title.slice(0, hasDraft ? 24 : 26);
   const suffix = hasUnread ? ` (${chat.unreadCount})` : "";
+  const highlighted = isSelected || isFlashing;
+  const titleStyle = { inverse: highlighted, bold: hasUnread || isActive, color: isActive ? "cyan" : undefined };
 
+  // Only the title shrinks: Ink truncates it by display width (CJK-safe), so
+  // the draft marker, unread count and typing marker always stay visible.
   return (
-    <Text wrap="truncate">
-      <Text color={hasUnread ? "cyan" : undefined} inverse={isSelected || isFlashing}>
-        {unreadIndicator}
+    <Box height={1}>
+      <Box flexShrink={0}>
+        <Text color={hasUnread ? "cyan" : undefined} inverse={highlighted}>
+          {unreadIndicator}
+        </Text>
+        <Text color={chat.isGroup ? "magenta" : undefined} inverse={highlighted}>
+          {groupIndicator}
+        </Text>
+      </Box>
+      <Text wrap="truncate" {...titleStyle}>
+        {chat.title}
       </Text>
-      <Text color={chat.isGroup ? "magenta" : undefined} inverse={isSelected || isFlashing}>
-        {groupIndicator}
-      </Text>
-      <Text
-        inverse={isSelected || isFlashing}
-        bold={hasUnread || isActive}
-        color={isActive ? "cyan" : undefined}
-      >
-        {title}
-        {hasDraft && <Text dimColor> ✎</Text>}
-        {suffix}
-      </Text>
-      {isTyping && <Text dimColor> …</Text>}
-    </Text>
+      <Box flexShrink={0}>
+        {hasDraft && (
+          <Text {...titleStyle} dimColor>
+            {" ✎"}
+          </Text>
+        )}
+        {suffix && <Text {...titleStyle}>{suffix}</Text>}
+        {isTyping && <Text dimColor> …</Text>}
+      </Box>
+    </Box>
   );
 });
 
