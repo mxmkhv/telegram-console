@@ -145,7 +145,7 @@ export function createMockTelegramService(options?: {
   typingIntervalMs?: number;
   typingClearMs?: number;
   failures?: MockFailures;
-}): TelegramService {
+}): TelegramService & { simulateIncomingMessage(chatId: string, text: string): void } {
   const failures = options?.failures ?? {};
   const typingIntervalMs = options?.typingIntervalMs ?? 8000;
   const typingClearMs = options?.typingClearMs ?? 3000;
@@ -159,7 +159,25 @@ export function createMockTelegramService(options?: {
   let typingInterval: NodeJS.Timeout | null = null;
   let typingClearTimer: NodeJS.Timeout | null = null;
 
+  function deliverIncoming(chatId: string, senderId: string, senderName: string, text: string) {
+    const message: Message = {
+      id: Date.now(),
+      senderId,
+      senderName,
+      text,
+      timestamp: new Date(),
+      isOutgoing: false,
+    };
+    (messages[chatId] ??= []).push(message);
+    messageCallbacks.forEach((cb) => cb(message, chatId));
+  }
+
   return {
+    // Test hook: deliver a message from the other side right away
+    simulateIncomingMessage(chatId: string, text: string) {
+      deliverIncoming(chatId, chatId, MOCK_CHATS.find((c) => c.id === chatId)?.title ?? "Someone", text);
+    },
+
     async connect() {
       connectionState = "connecting";
       connectionCallback?.(connectionState);
@@ -176,19 +194,7 @@ export function createMockTelegramService(options?: {
       dripInterval = setInterval(() => {
         if (messageCallbacks.size > 0) {
           const drip = DRIP_MESSAGES[dripIndex % DRIP_MESSAGES.length]!;
-          const message: Message = {
-            id: Date.now(),
-            senderId: drip.senderId,
-            senderName: drip.senderName,
-            text: drip.text,
-            timestamp: new Date(),
-            isOutgoing: false,
-          };
-          if (!messages[drip.chatId]) {
-            messages[drip.chatId] = [];
-          }
-          messages[drip.chatId]!.push(message);
-          messageCallbacks.forEach((cb) => cb(message, drip.chatId));
+          deliverIncoming(drip.chatId, drip.senderId, drip.senderName, drip.text);
           dripIndex++;
         }
       }, 5000);

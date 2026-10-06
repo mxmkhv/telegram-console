@@ -299,3 +299,79 @@ describe("MainApp failure feedback", () => {
     expect(lastFrame()).toContain("Couldn't load Elon Musk");
   });
 });
+
+describe("MainApp overlays own the keyboard", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const renderApp = (onLogout: (mode: string) => void = () => {}) =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={onLogout} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const ENTER = "\r";
+  const ESC = "\x1b";
+  const TAB = "\t";
+  const UP = "\x1b[A";
+  const LEFT = "\x1b[D";
+
+  it("a reaction lands on the message the picker was opened for", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    // Open Elon's chat, go to the messages panel (last message selected), react
+    await press(stdin, ENTER, ESC, "r", UP, LEFT, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Mars got boring | [ 👍 ]");
+    expect(frame).not.toContain("Why Jupiter? | [ 👍 ]");
+  });
+
+  it("a message arriving while the picker is open doesn't redirect the reaction", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, ESC, "r");
+    svc.simulateIncomingMessage("1", "Incoming while picking");
+    await wait();
+    await press(stdin, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Mars got boring | [ 👍 ]");
+    expect(frame).not.toContain("Incoming while picking | [ 👍 ]");
+  });
+
+  it("Enter on the logout prompt doesn't also open a chat, and hotkeys stay off", async () => {
+    const modes: string[] = [];
+    const { lastFrame, stdin } = renderApp((mode) => modes.push(mode));
+    await wait(250);
+
+    await press(stdin, "l", "m");
+    expect(lastFrame()).toContain("telegram-console"); // still full mode
+    expect(lastFrame()).toContain("What would you like to clear?");
+
+    await press(stdin, ENTER);
+    expect(modes).toEqual(["session"]);
+    expect(lastFrame()).toContain("Select a chat to start");
+  });
+
+  it("Tab in Settings only switches tabs, and Esc still exits", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, "s", TAB, TAB);
+    expect(lastFrame()).toContain("Settings");
+
+    await press(stdin, ESC);
+    expect(lastFrame()).not.toContain("Switch tab");
+    expect(lastFrame()).toContain("Elon Musk");
+    expect(lastFrame()).toContain("CHATLIST");
+  });
+});

@@ -7,6 +7,7 @@ import { SkinContext } from "./components/ui/SkinContext";
 import { getSkin } from "./config/skins";
 import { ShortcutsBar } from "./components/ShortcutsBar";
 import { AppProvider, useApp } from "./state/context";
+import { isOverlayOpen } from "./state/reducer";
 import { ChatList } from "./components/ChatList";
 import { ChatStrip } from "./components/ChatStrip";
 import { MessageView } from "./components/MessageView";
@@ -374,6 +375,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
   // Dynamic height budget
   const isMinimal = state.uiMode === "minimal";
+  const overlayOpen = isOverlayOpen(state);
   const modeIndicatorVisible = !!(state.replyingToMessage || state.editingMessage);
   const inputReserved = 3 + (modeIndicatorVisible ? 1 : 0) + (state.notice ? 1 : 0);
   // panelDividers skins replace HeaderBar/StatusBar's round border (2 rows)
@@ -405,8 +407,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      // Media popup owns the keyboard (MediaPanel handles its own keys)
-      if (state.mediaPanel.isOpen) {
+      // Overlays (settings, logout, reactions, media) handle their own keys
+      if (overlayOpen) {
         return;
       }
 
@@ -466,9 +468,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
       // Escape handling - context-aware focus chain
       if (key.escape) {
-        if (state.currentView === "settings") {
-          dispatch({ type: "SET_CURRENT_VIEW", payload: "chat" });
-        } else if (state.focusedPanel === "messages") {
+        if (state.focusedPanel === "messages") {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         } else if (state.focusedPanel === "chatList" && !isMinimal) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "header" });
@@ -485,12 +485,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      // Panel-specific navigation (suppressed while Settings owns the keyboard,
-      // so its own arrow-key handling doesn't also move chat/message selection
-      // in the background)
-      if (state.currentView === "settings") {
-        return;
-      }
+      // Panel-specific navigation
       if (state.focusedPanel === "chatList") {
         if (key.upArrow || (narrow && key.leftArrow)) {
           const newIndex = Math.max(0, chatIndex - 1);
@@ -513,16 +508,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
           setMessageIndex((i) => Math.min(currentMessages.length - 1, i + 1));
         } else if (key.leftArrow) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
-        } else if (key.return) {
-          // MessageView retries failed messages on Enter
-          if (currentMessages[messageIndex]?.delivery?.status === "failed") return;
-          // If at top and can load older, load them; otherwise go to input
-          if (canLoadOlder) {
-            loadOlderMessages();
-          } else {
-            dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
-          }
         }
+        // Enter belongs to MessageView
       }
     },
     { isActive: state.focusedPanel !== "input" && !state.isHidden }
@@ -588,9 +575,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
     const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
     const newMessageAdded = currentCount === prevCount + 1;
-    // Only auto-scroll to new message if user was already at the bottom
+    // Only auto-scroll to new message if user was already at the bottom, and
+    // not while a reaction picker is open on the current message
     const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
-    const shouldScrollToNew = newMessageAdded && wasAtBottom;
+    const shouldScrollToNew = newMessageAdded && wasAtBottom && !state.reactionOverlay;
 
     if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
       prevChatIdRef.current = chatId;
@@ -607,7 +595,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     if (chatId) {
       messageCounts.current[chatId] = currentCount;
     }
-  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages]);
+  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages, state.reactionOverlay]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {
@@ -747,6 +735,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 sendReaction={sendReaction}
                 removeReaction={removeReaction}
                 onRetryDelivery={handleRetryDelivery}
+                onLoadOlder={loadOlderMessages}
+                reactionOverlay={state.reactionOverlay}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
               />
             </Box>

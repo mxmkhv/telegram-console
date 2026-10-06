@@ -3,7 +3,7 @@ import { useInput } from "ink";
 import { Box, Text, useSkin } from "./ui";
 import type { Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
-import type { AppAction } from "../state/reducer.js";
+import type { AppAction, ReactionOverlay } from "../state/reducer.js";
 import { Logo, LOGO_COLS, LOGO_ROWS } from "./Logo";
 import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
 import { ReactionModal } from "./ReactionModal";
@@ -34,6 +34,8 @@ interface MessageViewProps {
   ) => Promise<boolean>;
   removeReaction: (chatId: string, messageId: number) => Promise<boolean>;
   onRetryDelivery: (chatId: string, message: Message) => void;
+  onLoadOlder: () => void;
+  reactionOverlay: ReactionOverlay;
   isTyping?: boolean;
 }
 
@@ -167,6 +169,8 @@ function MessageViewInner({
   sendReaction,
   removeReaction,
   onRetryDelivery,
+  onLoadOlder,
+  reactionOverlay,
   isTyping,
 }: MessageViewProps) {
   const skin = useSkin();
@@ -174,9 +178,14 @@ function MessageViewInner({
   // only the header row + its divider (no outer border rows to subtract).
   const visibleLines = Math.max(1, height - (skin.panelDividers ? 2 : 4));
   // Reaction picker state
-  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  // Open state lives in the app reducer so global keys can stand down
+  const reactionPickerOpen = reactionOverlay?.kind === "picker";
+  const reactionModalOpen = reactionOverlay?.kind === "modal";
+  const setReactionOverlay = useCallback(
+    (overlay: ReactionOverlay) => dispatch({ type: "SET_REACTION_OVERLAY", payload: overlay }),
+    [dispatch],
+  );
   const [reactionPickerIndex, setReactionPickerIndex] = useState(0);
-  const [reactionModalOpen, setReactionModalOpen] = useState(false);
   const [flashState, setFlashState] = useState<{
     messageId: number;
     color: string;
@@ -217,7 +226,7 @@ function MessageViewInner({
     }
   }, [isAtBottom, chatId, dispatch]);
 
-  // Handle 'r' key for reactions, 'R' (Shift+R) for reply, and Enter for media panel
+  // Message keys: 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
   useInput(
     (input, key) => {
       // Shift+R for reply (uppercase R)
@@ -237,7 +246,7 @@ function MessageViewInner({
           if (hasUserReaction(selectedMessage.reactions)) {
             handleRemoveReaction(selectedMessage.id);
           } else {
-            setReactionPickerOpen(true);
+            setReactionOverlay({ kind: "picker", messageId: selectedMessage.id });
             setReactionPickerIndex(0);
           }
         }
@@ -254,12 +263,18 @@ function MessageViewInner({
         return;
       }
 
-      // Enter handling: retry failed delivery, reply navigation OR media panel
+      // Enter: retry a failed message, load older at the top, jump to the
+      // replied message, open media, or else move to the input
       if (key.return) {
         const selectedMessage = chatMessages[selectedIndex];
 
         if (selectedMessage?.delivery?.status === "failed" && chatId) {
           onRetryDelivery(chatId, selectedMessage);
+          return;
+        }
+
+        if (canLoadOlder) {
+          onLoadOlder();
           return;
         }
 
@@ -275,13 +290,15 @@ function MessageViewInner({
           }
         }
 
-        // Otherwise, open media panel if message has media
         if (selectedMessage?.media) {
           dispatch({
             type: "OPEN_MEDIA_PANEL",
             payload: { messageId: selectedMessage.id },
           });
+          return;
         }
+
+        dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
       }
     },
     { isActive: isFocused && !reactionPickerOpen && !reactionModalOpen },
@@ -302,11 +319,10 @@ function MessageViewInner({
   // Reaction handlers
   const handleSendReaction = useCallback(
     async (emoji: string) => {
-      const messageId = chatMessages[selectedIndex]?.id;
-      if (!messageId || !chatId) return;
+      const messageId = reactionOverlay?.messageId;
+      if (messageId === undefined || !chatId) return;
 
-      setReactionPickerOpen(false);
-      setReactionModalOpen(false);
+      setReactionOverlay(null);
 
       // Optimistic update
       dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji } });
@@ -334,7 +350,7 @@ function MessageViewInner({
         }, 200);
       }
     },
-    [chatMessages, selectedIndex, chatId, dispatch, sendReaction],
+    [reactionOverlay, chatId, dispatch, sendReaction, setReactionOverlay],
   );
 
   const handleRemoveReaction = useCallback(
@@ -636,18 +652,15 @@ function MessageViewInner({
             visibleMessages.map((msg, i) => {
               const actualIndex = startIndex + i;
               const isSelected = actualIndex === selectedIndex && isFocused;
-              if (reactionPickerOpen && actualIndex === selectedIndex) {
+              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
                 return (
                   <ReactionPicker
                     key={msg.id}
                     emojis={QUICK_EMOJIS}
                     selectedIndex={reactionPickerIndex}
                     onSelect={handleSendReaction}
-                    onOpenModal={() => {
-                      setReactionPickerOpen(false);
-                      setReactionModalOpen(true);
-                    }}
-                    onCancel={() => setReactionPickerOpen(false)}
+                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+                    onCancel={() => setReactionOverlay(null)}
                   />
                 );
               }
@@ -660,18 +673,15 @@ function MessageViewInner({
               const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
               const flashColor = isFlashing ? flashState?.color : undefined;
 
-              if (reactionPickerOpen && actualIndex === selectedIndex) {
+              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
                 return (
                   <ReactionPicker
                     key={msg.id}
                     emojis={QUICK_EMOJIS}
                     selectedIndex={reactionPickerIndex}
                     onSelect={handleSendReaction}
-                    onOpenModal={() => {
-                      setReactionPickerOpen(false);
-                      setReactionModalOpen(true);
-                    }}
-                    onCancel={() => setReactionPickerOpen(false)}
+                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+                    onCancel={() => setReactionOverlay(null)}
                   />
                 );
               }
@@ -756,7 +766,7 @@ function MessageViewInner({
         <Box position="absolute" marginTop={5} marginLeft={10}>
           <ReactionModal
             onSelect={handleSendReaction}
-            onCancel={() => setReactionModalOpen(false)}
+            onCancel={() => setReactionOverlay(null)}
           />
         </Box>
       )}
