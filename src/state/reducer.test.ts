@@ -341,3 +341,57 @@ describe("SET_TYPING", () => {
     expect(reset.typingChats).toEqual({});
   });
 });
+
+describe("senderColors", () => {
+  const msg = (id: number, senderId: string) => ({ id, senderId, senderName: senderId, text: "Hi", timestamp: new Date(), isOutgoing: false });
+
+  it("keeps sender colors stable when older messages load", () => {
+    const loaded = appReducer(initialState, {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [msg(3, "zuck"), msg(4, "elon")] },
+    });
+    const colors = loaded.senderColors["1"]!;
+
+    const withOlder = appReducer(loaded, {
+      type: "PREPEND_MESSAGES",
+      payload: { chatId: "1", messages: [msg(1, "bezos"), msg(2, "gates")] },
+    });
+    const withNew = appReducer(withOlder, {
+      type: "ADD_MESSAGE",
+      payload: { chatId: "1", message: msg(5, "newcomer") },
+    });
+
+    const all = withNew.senderColors["1"]!;
+    expect(all.zuck).toBe(colors.zuck);
+    expect(all.elon).toBe(colors.elon);
+    expect(new Set(Object.values(all)).size).toBe(5);
+  });
+
+  it("does not assign a sender color to your own messages", () => {
+    const state = appReducer(initialState, {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [{ id: 1, senderId: "me", senderName: "You", text: "Hi", timestamp: new Date(), isOutgoing: true }] },
+    });
+    expect(state.senderColors["1"]?.me).toBeUndefined();
+  });
+
+  it("keeps the same senderColors object when no new sender arrives", () => {
+    const loaded = appReducer(initialState, {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [msg(1, "elon")] },
+    });
+    const next = appReducer(loaded, {
+      type: "ADD_MESSAGE",
+      payload: { chatId: "1", message: msg(2, "elon") },
+    });
+    expect(next.senderColors).toBe(loaded.senderColors);
+  });
+
+  it("does not assign a color to posts without a sender", () => {
+    const state = appReducer(initialState, {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [msg(1, "")] },
+    });
+    expect(state.senderColors["1"]).toBeUndefined();
+  });
+});

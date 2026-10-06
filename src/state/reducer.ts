@@ -1,4 +1,5 @@
 import type { Chat, Message, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
+import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export interface AppState {
   chats: Chat[];
   selectedChatId: string | null;
   messages: Record<string, Message[]>;
+  senderColors: Record<string, SenderColors>;
   focusedPanel: FocusedPanel;
   loadingOlderMessages: Record<string, boolean>;
   hasMoreMessages: Record<string, boolean>;
@@ -70,6 +72,7 @@ export const initialState: AppState = {
   chats: [],
   selectedChatId: null,
   messages: {},
+  senderColors: {},
   focusedPanel: "chatList",
   loadingOlderMessages: {},
   hasMoreMessages: {},
@@ -92,6 +95,18 @@ export const initialState: AppState = {
   typingChats: {},
 };
 
+function withSenderColors(
+  senderColors: Record<string, SenderColors>,
+  chatId: string,
+  messages: Message[],
+): Record<string, SenderColors> {
+  const existing = senderColors[chatId] ?? {};
+  // Posts without a sender (e.g. channels) have senderId "" and get no color.
+  const senderIds = messages.filter((m) => !m.isOutgoing && m.senderId).map((m) => m.senderId);
+  const next = assignSenderColors(existing, senderIds);
+  return next === existing ? senderColors : { ...senderColors, [chatId]: next };
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case "SET_CONNECTION_STATE":
@@ -112,6 +127,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_MESSAGES":
       return {
         ...state,
+        senderColors: withSenderColors(state.senderColors, action.payload.chatId, action.payload.messages),
         messages: {
           ...state.messages,
           [action.payload.chatId]: action.payload.messages,
@@ -147,6 +163,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         chats: updatedChats,
+        senderColors: withSenderColors(state.senderColors, chatId, [message]),
         messages: {
           ...state.messages,
           [chatId]: [
@@ -160,6 +177,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "PREPEND_MESSAGES":
       return {
         ...state,
+        senderColors: withSenderColors(state.senderColors, action.payload.chatId, action.payload.messages),
         messages: {
           ...state.messages,
           [action.payload.chatId]: [
