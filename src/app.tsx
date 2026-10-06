@@ -19,6 +19,7 @@ import { HeaderBar } from "./components/HeaderBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
 import { ChatSwitcher } from "./components/ChatSwitcher";
+import { HelpOverlay } from "./components/HelpOverlay";
 import { MediaPanel } from "./components/MediaPanel";
 import { BlankScreen } from "./components/BlankScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -234,6 +235,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: false });
   }, [dispatch]);
 
+  const closeHelp = useCallback(() => {
+    dispatch({ type: "SET_SHOW_HELP", payload: false });
+  }, [dispatch]);
+
   const handleSwitchToChat = useCallback(
     (chatId: string) => {
       dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: false });
@@ -435,6 +440,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
+      if (input === "?") {
+        dispatch({ type: "SET_SHOW_HELP", payload: true });
+        return;
+      }
+
       // Tab cycles panels
       if (key.tab) {
         if (state.focusedPanel === "header") {
@@ -475,6 +485,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
+      if (input === "s" || input === "S") {
+        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
+        return;
+      }
+      if (input === "l" || input === "L") {
+        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
+        return;
+      }
+
       // Header panel navigation
       if (state.focusedPanel === "header") {
         if (key.escape) {
@@ -497,14 +516,6 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "header" });
         }
         // mediaPanel escape is handled in MediaPanel component
-        return;
-      }
-      if (input === "s" || input === "S") {
-        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
-        return;
-      }
-      if (input === "l" || input === "L") {
-        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
         return;
       }
 
@@ -725,6 +736,14 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
               maxRows={Math.min(12, panelHeight - 6)}
             />
           </Box>
+        ) : state.showHelp ? (
+          <Box flexGrow={1} alignItems="center" justifyContent="center">
+            <HelpOverlay
+              onClose={closeHelp}
+              width={Math.min(100, terminalWidth - 2)}
+              height={terminalRows - headerReserved - statusReserved}
+            />
+          </Box>
         ) : state.currentView === "settings" ? (
           <SettingsPanel />
         ) : (
@@ -800,13 +819,14 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
               onCancelReply={handleCancelReply}
               onCancelEdit={handleCancelEdit}
             />
-            <ShortcutsBar />
+            <ShortcutsBar width={terminalWidth} isTyping={isInputFocused} />
           </>
         )}
         {!isMinimal && (
           <StatusBar
             connectionState={state.connectionState}
             focusedPanel={state.focusedPanel}
+            width={terminalWidth}
           />
         )}
       </Box>

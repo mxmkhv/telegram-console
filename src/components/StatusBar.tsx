@@ -1,10 +1,12 @@
 import { memo } from "react";
 import { Box, Text, useSkin } from "./ui";
 import type { ConnectionState, FocusedPanel } from "../types";
+import { PANEL_LABELS, fitHints, getPanelHints } from "../keymap";
 
 interface StatusBarProps {
   connectionState: ConnectionState;
   focusedPanel: FocusedPanel;
+  width: number;
 }
 
 function getStatusColor(state: ConnectionState): string {
@@ -29,22 +31,13 @@ function getStatusText(state: ConnectionState): string {
   }
 }
 
-function StatusBarInner({ connectionState, focusedPanel }: StatusBarProps) {
+function StatusBarInner({ connectionState, focusedPanel, width }: StatusBarProps) {
   const skin = useSkin();
-  const getHints = () => {
-    switch (focusedPanel) {
-      case "header":
-        return "[←→: Select] [Enter: Activate] [Tab: Next]";
-      case "chatList":
-        return "[↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back]";
-      case "messages":
-        return "[R: React] [Shift+R: Reply] [Enter: Message] [←: Chats] [Esc: Back]";
-      case "input":
-        return "[Enter: Send] [↑: Edit] [Esc: Back]";
-      default:
-        return "";
-    }
-  };
+  const label = PANEL_LABELS[focusedPanel];
+  // Round border (2) or bare rule (0), plus paddingX (2)
+  const chrome = (skin.panelDividers ? 0 : 2) + 2;
+  const leftWidth = `[${getStatusText(connectionState)}] ${label}`.length;
+  const hints = fitHints(getPanelHints(focusedPanel), width - chrome - leftWidth - 2);
 
   return (
     <Box
@@ -68,10 +61,10 @@ function StatusBarInner({ connectionState, focusedPanel }: StatusBarProps) {
         </Text>
         ]{" "}
         <Text bold color="cyan">
-          {focusedPanel.toUpperCase()}
+          {label}
         </Text>
       </Text>
-      <Text dimColor wrap="truncate">{getHints()}</Text>
+      {hints && <Text dimColor>{hints}</Text>}
     </Box>
   );
 }
