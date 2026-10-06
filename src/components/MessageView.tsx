@@ -690,7 +690,17 @@ function MessageViewInner({
           </Box>
         )}
       </Box>
-      {chatMessages.length === 0 ? (
+      {reactionModalOpen ? (
+        // Takes the place of the messages, so nothing shows through it
+        <Box height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
+          <ReactionModal
+            onSelect={handleSendReaction}
+            onCancel={() => setReactionOverlay(null)}
+            width={width - (skin.panelDividers ? 0 : 2)}
+            height={visibleLines}
+          />
+        </Box>
+      ) : chatMessages.length === 0 ? (
         <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
           {/* The hint line drops first when there's only one row */}
           {loadStatus === "loading" && (
@@ -768,6 +778,7 @@ function MessageViewInner({
                   onSelect={handleSendReaction}
                   onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
                   onCancel={() => setReactionOverlay(null)}
+                  width={contentWidth}
                 />
               ) : messageLayout === "bubble" ? (
                 renderBubbleMessage(msg, isSelected)
@@ -783,14 +794,6 @@ function MessageViewInner({
           </Text>
         )}
       </Box>
-      )}
-      {reactionModalOpen && (
-        <Box position="absolute" marginTop={5} marginLeft={10}>
-          <ReactionModal
-            onSelect={handleSendReaction}
-            onCancel={() => setReactionOverlay(null)}
-          />
-        </Box>
       )}
     </Box>
   );

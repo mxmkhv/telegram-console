@@ -659,3 +659,64 @@ describe("MessageView review regressions", () => {
   });
 });
 
+
+describe("MessageView reactions", () => {
+  const messages = [1, 2, 3].map(
+    (id): Message => ({
+      id,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${id}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }),
+  );
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Alice"
+      messages={messages}
+      selectedIndex={2}
+      width={50}
+      height={20}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+
+  it("centers the full grid in place of the messages", () => {
+    const lines = renderWithProvider(view({ reactionOverlay: { kind: "modal", messageId: 3 } })).lastFrame()!.split("\n");
+    expect(lines.join("\n")).not.toContain("message 3");
+    expect(lines.join("\n")).toContain("[Cancel]");
+    // 16 rows under the header hold the 11-row grid with 3 above and 2 below,
+    // and the 28-column grid sits 10 columns in from each side
+    expect(lines.findIndex((line) => line.includes("╭", 1))).toBe(6);
+    expect(lines.findIndex((line) => line.includes("╯", 1) && !line.startsWith("╰"))).toBe(16);
+    expect(lines[6]!.indexOf("╭", 1)).toBe(11);
+    expect(lines[6]!.length - 1 - lines[6]!.lastIndexOf("╮")).toBe(11);
+  });
+
+  it("drops the title and [Cancel] when the panel is short, keeping the emoji", () => {
+    const frame = renderWithProvider(view({ height: 8, reactionOverlay: { kind: "modal", messageId: 3 } })).lastFrame()!;
+    expect(frame.split("\n")).toHaveLength(8);
+    expect(frame).not.toContain("React");
+    expect(frame).not.toContain("[Cancel]");
+    expect(frame).toContain("👍");
+  });
+
+  it("scrolls the quick picker in a narrow panel instead of wrapping it", () => {
+    const frame = renderWithProvider(view({ width: 30, reactionOverlay: { kind: "picker", messageId: 3 } })).lastFrame()!;
+    const pickerRow = frame.split("\n").find((line) => line.includes("👍"))!;
+    expect(pickerRow).toContain("›");
+    expect(frame).not.toContain("[...]");
+    expect(frame).toContain("message 2");
+  });
+});
