@@ -4,7 +4,7 @@ import stringWidth from "string-width";
 import { Box, Text, useSkin } from "./ui";
 import type { Message, ImageSendResult, ChatDraft } from "../types";
 import { transformEmoticons } from "../utils/emoticonMap";
-import { findCursorRow, moveCursorToRow, nextBoundary, previousBoundary, wrapInput } from "../utils/inputLayout";
+import { findCursorRow, moveCursorToRow, nextBoundary, previousBoundary, sanitizeInput, wrapInput } from "../utils/inputLayout";
 
 /** A long draft scrolls inside the input past this many rows */
 export const MAX_INPUT_ROWS = 4;
@@ -56,10 +56,10 @@ function InputBarInner({
   onRowsChange,
 }: InputBarProps) {
   // Single state object prevents race conditions between value and cursor updates
-  const [state, setState] = useState<InputState>(() => ({
-    value: initialText,
-    cursor: initialText.length,
-  }));
+  const [state, setState] = useState<InputState>(() => {
+    const value = sanitizeInput(initialText);
+    return { value, cursor: value.length };
+  });
   const skin = useSkin();
 
   // Save the draft on unmount. The parent keys InputBar by chat, so the last
@@ -116,11 +116,8 @@ function InputBarInner({
   useEffect(() => {
     if (editingMessage === prevEditingRef.current) return;
     prevEditingRef.current = editingMessage;
-    setState(
-      editingMessage
-        ? { value: editingMessage.text, cursor: editingMessage.text.length }
-        : { value: "", cursor: 0 }
-    );
+    const value = editingMessage ? sanitizeInput(editingMessage.text) : "";
+    setState({ value, cursor: value.length });
   }, [editingMessage]);
 
   // Enter clears the input inside a state updater so fast typing isn't lost;
@@ -131,7 +128,8 @@ function InputBarInner({
     if (text === null || !selectedChatId) return;
     pendingSubmit.current = null;
     if (editingMessage && onEdit) {
-      if (text !== editingMessage.text) {
+      // Compared as shown, so opening an edit with tabs in it doesn't count as a change
+      if (text !== sanitizeInput(editingMessage.text)) {
         onEdit(text, selectedChatId, editingMessage.id);
       }
       onCancelEdit?.();
@@ -141,8 +139,10 @@ function InputBarInner({
     onCancelReply?.();
   });
 
-  // The caret, and the transient status on the right, share the first row
-  const chromeWidth = (skin.inputRibbon ? 2 : 4) + 2 + (status ? 1 + stringWidth(status) : 0);
+  // The caret, and the transient status on the right, share the first row.
+  // A long status (an error) is cut so the text keeps most of the row.
+  const statusWidth = status ? Math.min(1 + stringWidth(status), Math.floor(width / 3)) : 0;
+  const chromeWidth = (skin.inputRibbon ? 2 : 4) + 2 + statusWidth;
   // One column stays free for the cursor at the end of a row
   const wrapWidth = Math.max(1, width - chromeWidth - 1);
 
@@ -243,13 +243,7 @@ function InputBarInner({
       // Insert character at cursor position. Alt+Enter arrives as "\r" and
       // Ctrl+J as "\n": both start a new line, as do newlines in a paste.
       if (input && !key.ctrl && !key.meta) {
-        // Tabs measure as zero columns but the terminal expands them, and
-        // other control characters (keys that arrived glued together) garble the row
-        const text = input
-          .replace(/\r\n?/g, "\n")
-          .replace(/\t/g, "    ")
-          // eslint-disable-next-line no-control-regex
-          .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, "");
+        const text = sanitizeInput(input);
         if (!text) return;
         setState((s) => {
           const newValue = s.value.slice(0, s.cursor) + text + s.value.slice(s.cursor);
@@ -281,6 +275,8 @@ function InputBarInner({
   useEffect(() => {
     onRowsChange?.(neededRows);
   }, [neededRows, onRowsChange]);
+  // Overlays that replace the chat view get back the rows a long draft took
+  useEffect(() => () => onRowsChange?.(1), [onRowsChange]);
   const shownRows = rows ?? neededRows;
 
   // Scroll only as far as it takes to keep the cursor's row in view
@@ -331,7 +327,14 @@ function InputBarInner({
           ))
         )}
       </Box>
-      {status && <Text dimColor> {status}</Text>}
+      {status && (
+        <Box width={statusWidth} flexShrink={0}>
+          <Text dimColor wrap="truncate">
+            {" "}
+            {status}
+          </Text>
+        </Box>
+      )}
     </>
   );
 

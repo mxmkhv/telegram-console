@@ -558,6 +558,20 @@ describe("MainApp navigation keys", () => {
     expect(lastFrame()).toContain("> draft");
   });
 
+  it("a new message leaves the selection on a long message that's still being read", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    const longText = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n");
+    await press(stdin, "\r", longText, "\r", "\x1b");
+    expect(lastFrame()).toContain("(9/9)");
+    expect(lastFrame()).toContain("more lines");
+
+    svc.simulateIncomingMessage("1", "ping");
+    await wait();
+    expect(lastFrame()).toContain("(9/10)");
+    expect(lastFrame()).toContain("more lines");
+  });
+
   it("a long draft grows the input to 4 rows without pushing the header off", async () => {
     const { lastFrame, stdin } = renderApp();
     await wait(250);

@@ -625,6 +625,12 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     }
   }, [currentMessages, dispatch]);
 
+  // Set while the last message is taller than the panel and not read to its end
+  const readingLongMessage = useRef(false);
+  const handleLinesBelowChange = useCallback((linesBelow: boolean) => {
+    readingLongMessage.current = linesBelow;
+  }, []);
+
   // Reset message index to last message when chat changes or messages load
   // Track message counts per-chat to handle switching between chats correctly
   const prevChatIdRef = React.useRef<string | null>(null);
@@ -644,7 +650,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const newMessageAdded = currentCount === prevCount + 1;
     // Only auto-scroll to new message if user was already at the bottom, and
     // not while a reaction picker is open on the current message
-    const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
+    const wasAtBottom = prevCount === 0 || (messageIndex >= prevCount - 1 && !readingLongMessage.current);
     const shouldScrollToNew = newMessageAdded && wasAtBottom && !state.reactionOverlay;
 
     if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
@@ -826,6 +832,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 onLoadOlder={loadOlderMessages}
                 reactionOverlay={state.reactionOverlay}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
+                onLinesBelowChange={handleLinesBelowChange}
               />
             </Box>
             {isMinimal && state.connectionState !== "connected" && (

@@ -31,6 +31,8 @@ function ReactionModalInner({ onSelect, onCancel, isActive = true, width = Infin
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [onCancelRow, setOnCancelRow] = useState(false);
   const compact = height < FULL_HEIGHT;
+  // Shrinking to compact hides [Cancel]; the grid takes the selection back
+  const cancelSelected = onCancelRow && !compact;
 
   useInput(
     (input, key) => {
@@ -40,7 +42,7 @@ function ReactionModalInner({ onSelect, onCancel, isActive = true, width = Infin
       }
 
       if (key.return) {
-        if (onCancelRow) {
+        if (cancelSelected) {
           onCancel();
         } else {
           onSelect(MODAL_EMOJIS[selectedIndex]!);
@@ -48,21 +50,21 @@ function ReactionModalInner({ onSelect, onCancel, isActive = true, width = Infin
         return;
       }
 
-      if (key.leftArrow && !onCancelRow) {
+      if (key.leftArrow && !cancelSelected) {
         setSelectedIndex((i) => (i % COLS === 0 ? i : i - 1));
-      } else if (key.rightArrow && !onCancelRow) {
+      } else if (key.rightArrow && !cancelSelected) {
         setSelectedIndex((i) => ((i + 1) % COLS === 0 ? i : i + 1));
       } else if (key.upArrow) {
-        if (onCancelRow) {
+        if (cancelSelected) {
           setOnCancelRow(false);
         } else if (selectedIndex >= COLS) {
           setSelectedIndex((i) => i - COLS);
         }
       } else if (key.downArrow) {
-        if (!onCancelRow && selectedIndex >= COLS * (ROWS - 1)) {
+        if (!cancelSelected && selectedIndex >= COLS * (ROWS - 1)) {
           // Esc cancels when there's no room for the [Cancel] row
           if (!compact) setOnCancelRow(true);
-        } else if (!onCancelRow) {
+        } else if (!cancelSelected) {
           setSelectedIndex((i) => i + COLS);
         }
       }
@@ -98,7 +100,7 @@ function ReactionModalInner({ onSelect, onCancel, isActive = true, width = Infin
         <Box key={rowIndex} justifyContent="center">
           {row.map((emoji, colIndex) => {
             const index = rowIndex * COLS + colIndex;
-            const isSelected = !onCancelRow && index === selectedIndex;
+            const isSelected = !cancelSelected && index === selectedIndex;
             return (
               <Text key={emoji} inverse={isSelected}>
                 {" "}{emoji}{" "}
@@ -110,7 +112,7 @@ function ReactionModalInner({ onSelect, onCancel, isActive = true, width = Infin
       })}
       {!compact && (
         <Box justifyContent="center" marginTop={1}>
-          <Text inverse={onCancelRow} dimColor={!onCancelRow}>
+          <Text inverse={cancelSelected} dimColor={!cancelSelected}>
             [Cancel]
           </Text>
         </Box>

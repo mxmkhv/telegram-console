@@ -2,6 +2,21 @@ import stringWidth from "string-width";
 
 const segmenter = new Intl.Segmenter();
 
+/**
+ * Text as the input can show it: newlines normalized, tabs as spaces (they
+ * measure as zero columns but the terminal expands them), and other control
+ * characters, such as keys that arrived glued together, dropped
+ */
+export function sanitizeInput(text: string): string {
+  return (
+    text
+      .replace(/\r\n?/g, "\n")
+      .replace(/\t/g, "    ")
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, "")
+  );
+}
+
 /** A row of the input as [start, end) offsets into its text */
 export interface InputRow {
   start: number;

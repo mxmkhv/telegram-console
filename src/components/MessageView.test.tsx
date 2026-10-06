@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
+import { useInput } from "ink";
 import { MessageView, countWrappedLines } from "./MessageView";
 import { LOGO_COLS, LOGO_ROWS } from "./logoAssets";
 import { AppProvider } from "../state/context";
@@ -807,5 +808,139 @@ describe("MessageView tall messages", () => {
     await tick();
     expect(lastFrame()).toMatch(/line 1 /);
     expect(lastFrame()).toContain("↓ 6 more lines");
+  });
+
+  it("G and g reach the end and top of a long message that's already selected", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, "short"), msg(2, tall)]} initialIndex={1} />);
+    stdin.write("G");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toContain("more lines");
+  });
+
+  it("reports lines left below, so the app keeps the selection for new messages", async () => {
+    const reports: boolean[] = [];
+    const { stdin } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[msg(1, tall)]}
+        selectedIndex={0}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+        onLinesBelowChange={(linesBelow) => reports.push(linesBelow)}
+      />,
+    );
+    await tick();
+    stdin.write("G");
+    await tick();
+    expect(reports).toEqual([true, false]);
+  });
+
+  it("has nothing to scroll while the quick picker stands in for the message", () => {
+    const frame = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[msg(1, "short"), msg(2, tall)]}
+        selectedIndex={1}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={{ kind: "picker", messageId: 2 }}
+      />,
+    ).lastFrame()!;
+    expect(frame).toContain("👍");
+    expect(frame).not.toContain("more lines");
+  });
+
+  it("keeps every row whole on a panel with room for 2", () => {
+    for (const selectedIndex of [0, 1]) {
+      const frame = renderWithProvider(
+        <MessageView
+          isFocused
+          selectedChatTitle="Alice"
+          messages={[msg(1, tall), msg(2, tall)]}
+          selectedIndex={selectedIndex}
+          canLoadOlder={selectedIndex === 0}
+          width={40}
+          height={6}
+          dispatch={mockDispatch}
+          messageLayout="classic"
+          isGroupChat={false}
+          chatId="1"
+          sendReaction={mockSendReaction}
+          removeReaction={mockRemoveReaction}
+          onRetryDelivery={mockRetryDelivery}
+          onLoadOlder={mockLoadOlder}
+          reactionOverlay={null}
+        />,
+      ).lastFrame()!;
+      // The top row and one message row: no "↓ more lines" written over them
+      expect(frame.split("\n")).toHaveLength(6);
+      expect(frame).not.toContain("more line");
+      expect(frame.split("\n")[3]).toMatch(selectedIndex === 0 ? /load older/ : /1 earlier/);
+    }
+  });
+
+  it("starts at the top again in another chat with the same message ids", async () => {
+    function Switcher() {
+      const [chatId, setChatId] = React.useState("1");
+      const [selectedIndex, setSelectedIndex] = React.useState(1);
+      return (
+        <>
+          <MessageView
+            isFocused
+            selectedChatTitle="Alice"
+            messages={[msg(1, "short"), msg(2, tall)]}
+            selectedIndex={selectedIndex}
+            setSelectedIndex={setSelectedIndex}
+            width={40}
+            height={12}
+            dispatch={mockDispatch}
+            messageLayout="classic"
+            isGroupChat={false}
+            chatId={chatId}
+            sendReaction={mockSendReaction}
+            removeReaction={mockRemoveReaction}
+            onRetryDelivery={mockRetryDelivery}
+            onLoadOlder={mockLoadOlder}
+            reactionOverlay={null}
+          />
+          <SwitchOnX onSwitch={() => setChatId((id) => (id === "1" ? "2" : "1"))} />
+        </>
+      );
+    }
+    function SwitchOnX({ onSwitch }: { onSwitch: () => void }) {
+      useInput((input) => {
+        if (input === "x") onSwitch();
+      });
+      return null;
+    }
+    const { lastFrame, stdin } = renderWithProvider(<Switcher />);
+    stdin.write("G");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    stdin.write("x");
+    await tick();
+    stdin.write("x");
+    await tick();
+    expect(lastFrame()).toMatch(/line 1 /);
   });
 });

@@ -496,5 +496,50 @@ describe("InputBar", () => {
       await tick();
       expect(textRows(lastFrame())).toEqual(["x"]);
     });
+
+    it("shows an edited message's tabs as spaces and doesn't count that as an edit", async () => {
+      const edits: string[] = [];
+      const props = { width: 40, isFocused: true, onSubmit: mockOnSubmit, selectedChatId: "123", onEdit: (text: string) => edits.push(text) };
+      const { lastFrame, stdin, rerender } = render(<InputBar {...props} />);
+      rerender(<InputBar {...props} editingMessage={{ id: 9, senderId: "me", senderName: "You", text: "a\tb", timestamp: new Date(), isOutgoing: true }} />);
+      await tick();
+      expect(textRows(lastFrame())).toEqual(["a    b"]);
+      stdin.write("\r");
+      await tick();
+      expect(edits).toEqual([]);
+    });
+
+    it("cuts a long image error so the draft keeps its row", async () => {
+      const longError = `Image not sent (${"PHOTO_INVALID_DIMENSIONS ".repeat(3)})`;
+      const { lastFrame, stdin } = render(
+        <Box width={80}>
+          <InputBar
+            width={80}
+            isFocused={true}
+            onSubmit={mockOnSubmit}
+            selectedChatId="123"
+            initialText="hello world"
+            onSendImage={async () => ({ ok: false, error: longError })}
+          />
+        </Box>
+      );
+      await tick();
+      stdin.write("\x16");
+      await tick();
+      const lines = (lastFrame() ?? "").split("\n");
+      expect(lines).toHaveLength(3);
+      expect(lines[1]).toContain("hello world");
+      expect(lines[1]).toContain("Image not");
+    });
+
+    it("gives back its rows when it unmounts", async () => {
+      const reported: number[] = [];
+      const { unmount } = render(
+        <InputBar width={40} isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" initialText={"1\n2\n3"} onRowsChange={(rows) => reported.push(rows)} />
+      );
+      await tick();
+      unmount();
+      expect(reported).toEqual([3, 1]);
+    });
   });
 });

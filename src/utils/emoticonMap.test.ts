@@ -127,6 +127,13 @@ describe("transformEmoticons", () => {
     });
   });
 
+  describe("multiline text", () => {
+    it("converts an emoticon at the start of a new line", () => {
+      expect(transformEmoticons("hi\n:) ", 6).text).toBe("hi\n🙂 ");
+      expect(transformEmoticons("hello\n:)", 8).text).toBe("hello\n🙂");
+    });
+  });
+
   describe("edge cases - no transformation", () => {
     it("returns unchanged text when no emoticon matches", () => {
       const result = transformEmoticons("hello world ", 12);
