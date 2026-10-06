@@ -575,9 +575,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
     const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
     const newMessageAdded = currentCount === prevCount + 1;
-    // Only auto-scroll to new message if user was already at the bottom
+    // Only auto-scroll to new message if user was already at the bottom, and
+    // not while a reaction picker is open on the current message
     const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
-    const shouldScrollToNew = newMessageAdded && wasAtBottom;
+    const shouldScrollToNew = newMessageAdded && wasAtBottom && !state.reactionOverlay;
 
     if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
       prevChatIdRef.current = chatId;
@@ -594,7 +595,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     if (chatId) {
       messageCounts.current[chatId] = currentCount;
     }
-  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages]);
+  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages, state.reactionOverlay]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {

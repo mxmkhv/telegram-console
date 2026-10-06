@@ -179,8 +179,8 @@ function MessageViewInner({
   const visibleLines = Math.max(1, height - (skin.panelDividers ? 2 : 4));
   // Reaction picker state
   // Open state lives in the app reducer so global keys can stand down
-  const reactionPickerOpen = reactionOverlay === "picker";
-  const reactionModalOpen = reactionOverlay === "modal";
+  const reactionPickerOpen = reactionOverlay?.kind === "picker";
+  const reactionModalOpen = reactionOverlay?.kind === "modal";
   const setReactionOverlay = useCallback(
     (overlay: ReactionOverlay) => dispatch({ type: "SET_REACTION_OVERLAY", payload: overlay }),
     [dispatch],
@@ -246,7 +246,7 @@ function MessageViewInner({
           if (hasUserReaction(selectedMessage.reactions)) {
             handleRemoveReaction(selectedMessage.id);
           } else {
-            setReactionOverlay("picker");
+            setReactionOverlay({ kind: "picker", messageId: selectedMessage.id });
             setReactionPickerIndex(0);
           }
         }
@@ -263,18 +263,18 @@ function MessageViewInner({
         return;
       }
 
-      // Enter: load older at the top, retry a failed message, jump to the
+      // Enter: retry a failed message, load older at the top, jump to the
       // replied message, open media, or else move to the input
       if (key.return) {
         const selectedMessage = chatMessages[selectedIndex];
 
-        if (canLoadOlder) {
-          onLoadOlder();
+        if (selectedMessage?.delivery?.status === "failed" && chatId) {
+          onRetryDelivery(chatId, selectedMessage);
           return;
         }
 
-        if (selectedMessage?.delivery?.status === "failed" && chatId) {
-          onRetryDelivery(chatId, selectedMessage);
+        if (canLoadOlder) {
+          onLoadOlder();
           return;
         }
 
@@ -319,8 +319,8 @@ function MessageViewInner({
   // Reaction handlers
   const handleSendReaction = useCallback(
     async (emoji: string) => {
-      const messageId = chatMessages[selectedIndex]?.id;
-      if (!messageId || !chatId) return;
+      const messageId = reactionOverlay?.messageId;
+      if (messageId === undefined || !chatId) return;
 
       setReactionOverlay(null);
 
@@ -350,7 +350,7 @@ function MessageViewInner({
         }, 200);
       }
     },
-    [chatMessages, selectedIndex, chatId, dispatch, sendReaction, setReactionOverlay],
+    [reactionOverlay, chatId, dispatch, sendReaction, setReactionOverlay],
   );
 
   const handleRemoveReaction = useCallback(
@@ -652,14 +652,14 @@ function MessageViewInner({
             visibleMessages.map((msg, i) => {
               const actualIndex = startIndex + i;
               const isSelected = actualIndex === selectedIndex && isFocused;
-              if (reactionPickerOpen && actualIndex === selectedIndex) {
+              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
                 return (
                   <ReactionPicker
                     key={msg.id}
                     emojis={QUICK_EMOJIS}
                     selectedIndex={reactionPickerIndex}
                     onSelect={handleSendReaction}
-                    onOpenModal={() => setReactionOverlay("modal")}
+                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
                     onCancel={() => setReactionOverlay(null)}
                   />
                 );
@@ -673,14 +673,14 @@ function MessageViewInner({
               const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
               const flashColor = isFlashing ? flashState?.color : undefined;
 
-              if (reactionPickerOpen && actualIndex === selectedIndex) {
+              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
                 return (
                   <ReactionPicker
                     key={msg.id}
                     emojis={QUICK_EMOJIS}
                     selectedIndex={reactionPickerIndex}
                     onSelect={handleSendReaction}
-                    onOpenModal={() => setReactionOverlay("modal")}
+                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
                     onCancel={() => setReactionOverlay(null)}
                   />
                 );

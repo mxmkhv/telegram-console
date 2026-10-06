@@ -335,6 +335,19 @@ describe("MainApp overlays own the keyboard", () => {
     expect(frame).not.toContain("Why Jupiter? | [ 👍 ]");
   });
 
+  it("a message arriving while the picker is open doesn't redirect the reaction", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, ESC, "r");
+    svc.simulateIncomingMessage("1", "Incoming while picking");
+    await wait();
+    await press(stdin, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("Mars got boring | [ 👍 ]");
+    expect(frame).not.toContain("Incoming while picking | [ 👍 ]");
+  });
+
   it("Enter on the logout prompt doesn't also open a chat, and hotkeys stay off", async () => {
     const modes: string[] = [];
     const { lastFrame, stdin } = renderApp((mode) => modes.push(mode));

@@ -34,8 +34,9 @@ export interface AppState {
   reactionOverlay: ReactionOverlay;
 }
 
-// The quick-reaction row under a message, or the full emoji grid
-export type ReactionOverlay = "picker" | "modal" | null;
+// The quick-reaction row or the full emoji grid, pinned to the message it was
+// opened on so new messages arriving can't redirect the reaction
+export type ReactionOverlay = { kind: "picker" | "modal"; messageId: number } | null;
 
 export type AppAction =
   | { type: "SET_CONNECTION_STATE"; payload: ConnectionState }
