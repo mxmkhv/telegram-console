@@ -180,6 +180,8 @@ function MessageViewInner({
     [dispatch],
   );
   const [reactionPickerIndex, setReactionPickerIndex] = useState(0);
+  // How far a message taller than the panel is scrolled; it starts at its top
+  const [messageScroll, setMessageScroll] = useState<{ chatId: string | null; messageId: number; offset: number } | null>(null);
   const [flashState, setFlashState] = useState<{
     messageId: number;
     color: string;
@@ -225,15 +227,23 @@ function MessageViewInner({
     (input, key) => {
       // Ctrl/Alt chords arrive as their letter (Ctrl+R as "r"): they belong to App
       if (key.ctrl || key.meta) return;
-      const moveTo = (index: number) => {
-        if (chatMessages.length > 0) setSelectedIndex?.(Math.max(0, Math.min(chatMessages.length - 1, index)));
+      // A tall message shows its top, or its end when stepping up into it
+      const moveTo = (index: number, fromEnd = false) => {
+        const target = Math.max(0, Math.min(chatMessages.length - 1, index));
+        if (chatMessages.length === 0 || target === selectedIndex) return;
+        setMessageScroll(fromEnd ? { chatId, messageId: chatMessages[target]!.id, offset: Number.MAX_SAFE_INTEGER } : null);
+        setSelectedIndex?.(target);
       };
+      // A tall message scrolls through its own lines before the selection moves
+      const scrollTo = (offset: number) =>
+        setMessageScroll({ chatId, messageId: chatMessages[selectedIndex]!.id, offset: Math.max(0, Math.min(maxScroll, offset)) });
       // A page keeps one message of overlap for context
       const pageSize = Math.max(1, endIndex - startIndex - 1);
-      if (key.upArrow || input === "k") return moveTo(selectedIndex - 1);
-      if (key.downArrow || input === "j") return moveTo(selectedIndex + 1);
-      if (key.pageUp) return moveTo(selectedIndex - pageSize);
-      if (key.pageDown) return moveTo(selectedIndex + pageSize);
+      const linePage = Math.max(1, tallRows - 1);
+      if (key.upArrow || input === "k") return scrollOffset > 0 ? scrollTo(scrollOffset - 1) : moveTo(selectedIndex - 1, true);
+      if (key.downArrow || input === "j") return scrollOffset < maxScroll ? scrollTo(scrollOffset + 1) : moveTo(selectedIndex + 1);
+      if (key.pageUp) return scrollOffset > 0 ? scrollTo(scrollOffset - linePage) : moveTo(selectedIndex - pageSize, true);
+      if (key.pageDown) return scrollOffset < maxScroll ? scrollTo(scrollOffset + linePage) : moveTo(selectedIndex + pageSize);
       if (key.home || input === "g") return moveTo(0);
       if (key.end || input === "G") return moveTo(chatMessages.length - 1);
 
@@ -292,7 +302,7 @@ function MessageViewInner({
             (m) => m.id === selectedMessage.replyToMsgId
           );
           if (originalIndex >= 0) {
-            setSelectedIndex(originalIndex);
+            moveTo(originalIndex);
             startMsgFlash(selectedMessage.replyToMsgId, FLASH_CONFIG.messageFlashCount);
             return;
           }
@@ -526,6 +536,20 @@ function MessageViewInner({
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
 
+  // A message taller than the panel is shown alone and scrolls inside its
+  // own rows, with the top row for what's above and the bottom for what's left
+  const topRow = isLoadingOlder || canLoadOlder || showScrollUp ? 1 : 0;
+  const tallRows = Math.max(1, visibleLines - topRow - 1);
+  const maxScroll = overflows ? Math.max(0, messageLineCounts[selectedIndex]! - tallRows) : 0;
+  const scrollOffset =
+    overflows &&
+    !reactionPickerOpen &&
+    messageScroll &&
+    messageScroll.chatId === chatId &&
+    messageScroll.messageId === chatMessages[selectedIndex]?.id
+      ? Math.min(messageScroll.offset, maxScroll)
+      : 0;
+
   const colorForSender = (senderId: string) =>
     senderColors?.[senderId] ?? getSenderColor(senderId);
 
@@ -630,6 +654,37 @@ function MessageViewInner({
             </Text>
           );
         })}
+      </Box>
+    );
+  };
+
+  // A message with its day label, or the quick picker in its place
+  const renderEntry = (msg: Message, index: number) => {
+    const isSelected = index === selectedIndex && isFocused;
+    const daySeparator = daySeparators[index];
+    return (
+      <Box key={msg.id} flexDirection="column" flexShrink={0}>
+        {daySeparator && (
+          <Box justifyContent="center">
+            <Text dimColor wrap="truncate">
+              ── {daySeparator} ──
+            </Text>
+          </Box>
+        )}
+        {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
+          <ReactionPicker
+            emojis={QUICK_EMOJIS}
+            selectedIndex={reactionPickerIndex}
+            onSelect={handleSendReaction}
+            onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+            onCancel={() => setReactionOverlay(null)}
+            width={contentWidth}
+          />
+        ) : messageLayout === "bubble" ? (
+          renderBubbleMessage(msg, isSelected)
+        ) : (
+          renderClassicMessage(msg, isSelected)
+        )}
       </Box>
     );
   };
@@ -758,37 +813,24 @@ function MessageViewInner({
             {" "}↑ {startIndex} earlier
           </Text>
         )}
-        {visibleMessages.map((msg, i) => {
-          const actualIndex = startIndex + i;
-          const isSelected = actualIndex === selectedIndex && isFocused;
-          const daySeparator = daySeparators[actualIndex];
-          return (
-            <Box key={msg.id} flexDirection="column" flexShrink={0}>
-              {daySeparator && (
-                <Box justifyContent="center">
-                  <Text dimColor wrap="truncate">
-                    ── {daySeparator} ──
-                  </Text>
-                </Box>
-              )}
-              {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
-                <ReactionPicker
-                  emojis={QUICK_EMOJIS}
-                  selectedIndex={reactionPickerIndex}
-                  onSelect={handleSendReaction}
-                  onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
-                  onCancel={() => setReactionOverlay(null)}
-                  width={contentWidth}
-                />
-              ) : messageLayout === "bubble" ? (
-                renderBubbleMessage(msg, isSelected)
-              ) : (
-                renderClassicMessage(msg, isSelected)
-              )}
+        {overflows ? (
+          <Box height={tallRows} flexShrink={0} flexDirection="column" overflow="hidden">
+            <Box marginTop={-scrollOffset} flexDirection="column" flexShrink={0}>
+              {renderEntry(chatMessages[selectedIndex]!, selectedIndex)}
             </Box>
-          );
-        })}
-        {showScrollDown && (
+          </Box>
+        ) : (
+          visibleMessages.map((msg, i) => renderEntry(msg, startIndex + i))
+        )}
+        {overflows && scrollOffset < maxScroll ? (
+          <Text dimColor wrap="truncate">
+            {" "}↓ {maxScroll - scrollOffset} more {maxScroll - scrollOffset === 1 ? "line" : "lines"}
+          </Text>
+        ) : overflows && !showScrollDown ? (
+          // Keeps the bottom row the message was laid out around
+          <Text> </Text>
+        ) : null}
+        {showScrollDown && !(overflows && scrollOffset < maxScroll) && (
           <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
             {" "}↓ {chatMessages.length - endIndex} more
           </Text>

@@ -50,7 +50,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
   messages: {
     title: "Messages",
     bindings: [
-      { keys: ["↑↓", "j/k"], action: "Select a message" },
+      { keys: ["↑↓", "j/k"], action: "Select a message, or scroll a long one" },
       { keys: ["PgUp", "PgDn"], action: "Page up / down" },
       { keys: ["g", "Home"], action: "Oldest loaded message" },
       { keys: ["G", "End"], action: "Newest message" },

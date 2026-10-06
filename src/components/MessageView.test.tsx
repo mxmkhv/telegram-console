@@ -513,13 +513,18 @@ describe("MessageView paging", () => {
       isOutgoing: false,
     }));
     const moves: number[] = [];
-    const { stdin } = renderWithProvider(
+    function Paged() {
+      const [selectedIndex, setSelectedIndex] = React.useState(29);
+      return (
       <MessageView
         isFocused
         selectedChatTitle="Alice"
         messages={messages}
-        selectedIndex={29}
-        setSelectedIndex={(index) => moves.push(index)}
+        selectedIndex={selectedIndex}
+        setSelectedIndex={(index) => {
+          moves.push(index);
+          setSelectedIndex(index);
+        }}
         width={40}
         height={12}
         dispatch={mockDispatch}
@@ -531,14 +536,17 @@ describe("MessageView paging", () => {
         onRetryDelivery={mockRetryDelivery}
         onLoadOlder={mockLoadOlder}
         reactionOverlay={null}
-      />,
-    );
+      />
+      );
+    }
+    const { stdin } = renderWithProvider(<Paged />);
     stdin.write("\x1b[5~");
     await new Promise((r) => setTimeout(r, 30));
     stdin.write("\x1b[6~");
     await new Promise((r) => setTimeout(r, 30));
-    // 8 rows: the "↑ earlier" line + 7 messages, so a page is 6 (one message overlaps)
-    expect(moves).toEqual([23, 29]);
+    // 8 rows: the "↑ earlier" line + 7 messages, so a page is 6 (one message
+    // overlaps). Mid-list both indicators show, leaving 6 messages: a page of 5.
+    expect(moves).toEqual([23, 28]);
   });
 });
 
@@ -718,5 +726,86 @@ describe("MessageView reactions", () => {
     expect(pickerRow).toContain("›");
     expect(frame).not.toContain("[...]");
     expect(frame).toContain("message 2");
+  });
+});
+
+describe("MessageView tall messages", () => {
+  const msg = (id: number, text: string): Message => ({
+    id,
+    senderId: "user1",
+    senderName: "Alice",
+    text,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+  });
+  const tall = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+  const tick = () => new Promise((r) => setTimeout(r, 30));
+
+  // height 12 leaves 8 message rows: one for "↑ earlier", one for what's left below
+  function Harness({ messages, initialIndex }: { messages: Message[]; initialIndex: number }) {
+    const [selectedIndex, setSelectedIndex] = React.useState(initialIndex);
+    return (
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={selectedIndex}
+        setSelectedIndex={setSelectedIndex}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />
+    );
+  }
+
+  it("scrolls through a message taller than the panel before moving on", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, "short"), msg(2, tall)]} initialIndex={1} />);
+    // 12 lines in 6 rows: it opens at its top with 6 to go
+    expect(lastFrame()).toMatch(/line 1 /);
+    expect(lastFrame()).toContain("↓ 6 more lines");
+
+    stdin.write("j");
+    await tick();
+    expect(lastFrame()).toContain("↓ 5 more lines");
+    expect(lastFrame()).not.toMatch(/line 1 /);
+
+    stdin.write("\x1b[6~");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toContain("more lines");
+
+    for (let i = 0; i < 6; i++) {
+      stdin.write("k");
+      await tick();
+    }
+    expect(lastFrame()).toContain("↓ 6 more lines");
+    expect(lastFrame()).toContain("(2/2)");
+
+    stdin.write("k");
+    await tick();
+    expect(lastFrame()).toContain("(1/2)");
+  });
+
+  it("shows a tall message's end when stepping up into it, and its top after a jump", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, tall), msg(2, "short")]} initialIndex={1} />);
+    stdin.write("k");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toMatch(/line 1 /);
+
+    stdin.write("G");
+    await tick();
+    stdin.write("g");
+    await tick();
+    expect(lastFrame()).toMatch(/line 1 /);
+    expect(lastFrame()).toContain("↓ 6 more lines");
   });
 });

@@ -97,19 +97,19 @@ Press `?` in the app for the full list. `^` means Ctrl.
 
 #### Messages
 
-| Key           | Action                             |
-| ------------- | ---------------------------------- |
-| `↑↓` `j/k`    | Select a message                   |
-| `PgUp` `PgDn` | Page up / down                     |
-| `g` `Home`    | Oldest loaded message              |
-| `G` `End`     | Newest message                     |
-| `r`           | React, or remove your reaction     |
-| `R`           | Reply                              |
-| `Enter`       | Open media, jump to reply, or type |
-| `Enter`       | Oldest message: load older ones    |
-| `Enter`       | Failed message: retry              |
-| `x`           | Failed message: discard or undo    |
-| `←` `Esc`     | Go to chats                        |
+| Key           | Action                                 |
+| ------------- | -------------------------------------- |
+| `↑↓` `j/k`    | Select a message, or scroll a long one |
+| `PgUp` `PgDn` | Page up / down                         |
+| `g` `Home`    | Oldest loaded message                  |
+| `G` `End`     | Newest message                         |
+| `r`           | React, or remove your reaction         |
+| `R`           | Reply                                  |
+| `Enter`       | Open media, jump to reply, or type     |
+| `Enter`       | Oldest message: load older ones        |
+| `Enter`       | Failed message: retry                  |
+| `x`           | Failed message: discard or undo        |
+| `←` `Esc`     | Go to chats                            |
 
 #### Typing
 
