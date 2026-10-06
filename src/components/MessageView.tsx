@@ -206,6 +206,10 @@ function MessageViewInner({
     (input, key) => {
       // Ctrl/Alt chords arrive as their letter (Ctrl+R as "r"): they belong to App
       if (key.ctrl || key.meta) return;
+      // Empty, loading or failed: nothing to move to or act on, but Enter
+      // still goes to the input
+      const selectedMessage = chatMessages[selectedIndex];
+      if (!selectedMessage && !key.return) return;
       // A tall message shows its top, or its end when stepping up into it
       const moveTo = (index: number, fromEnd = false) => {
         const target = Math.max(0, Math.min(chatMessages.length - 1, index));
@@ -214,8 +218,9 @@ function MessageViewInner({
         setSelectedIndex?.(target);
       };
       // A tall message scrolls through its own lines before the selection moves
-      const scrollTo = (offset: number) =>
-        setMessageScroll({ messageId: chatMessages[selectedIndex]!.id, offset: Math.max(0, Math.min(maxScroll, offset)) });
+      const scrollTo = (offset: number) => {
+        if (selectedMessage) setMessageScroll({ messageId: selectedMessage.id, offset: Math.max(0, Math.min(maxScroll, offset)) });
+      };
       // A page keeps one message of overlap for context
       const pageSize = Math.max(1, endIndex - startIndex - 1);
       const linePage = Math.max(1, tallRows - 1);
@@ -229,7 +234,6 @@ function MessageViewInner({
 
       // Shift+R for reply (uppercase R)
       if (input === "R") {
-        const selectedMessage = chatMessages[selectedIndex];
         if (selectedMessage && !isUnsent(selectedMessage)) {
           dispatch({ type: "SET_REPLYING_TO", payload: selectedMessage });
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
@@ -239,7 +243,6 @@ function MessageViewInner({
 
       // 'r' key for reactions (lowercase only now)
       if (input === "r") {
-        const selectedMessage = chatMessages[selectedIndex];
         if (selectedMessage && !isUnsent(selectedMessage)) {
           if (hasUserReaction(selectedMessage.reactions)) {
             handleRemoveReaction(selectedMessage.id);
@@ -253,7 +256,6 @@ function MessageViewInner({
 
       // Discard a failed send, or undo a failed edit
       if (input === "x") {
-        const selectedMessage = chatMessages[selectedIndex];
         if (selectedMessage?.delivery?.status === "failed" && chatId) {
           dispatch({ type: "DISCARD_UNSENT", payload: { chatId, messageId: selectedMessage.id } });
           dispatch({ type: "CLEAR_NOTICE" });
@@ -264,7 +266,6 @@ function MessageViewInner({
       // Enter: retry a failed message, load older at the top, jump to the
       // replied message, open media, or else move to the input
       if (key.return) {
-        const selectedMessage = chatMessages[selectedIndex];
 
         if (selectedMessage?.delivery?.status === "failed" && chatId) {
           onRetryDelivery(chatId, selectedMessage);

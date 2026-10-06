@@ -572,6 +572,21 @@ describe("MainApp navigation keys", () => {
     expect(lastFrame()).toContain("more lines");
   });
 
+  it("a new message is followed when the last one exactly filled the panel", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    // Day label + 8 lines + "↑ 8 earlier" fill the 10 message rows exactly
+    const text = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n");
+    await press(stdin, "\r", text, "\r", "\x1b");
+    expect(lastFrame()).toContain("(9/9)");
+    expect(lastFrame()).not.toContain("more line");
+
+    svc.simulateIncomingMessage("1", "ping");
+    await wait();
+    expect(lastFrame()).toContain("(10/10)");
+    expect(lastFrame()).toContain("ping");
+  });
+
   it("a long draft grows the input to 4 rows without pushing the header off", async () => {
     const { lastFrame, stdin } = renderApp();
     await wait(250);

@@ -625,11 +625,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     }
   }, [currentMessages, dispatch]);
 
-  // Set while the last message is taller than the panel and not read to its end
-  const readingLongMessage = useRef(false);
-  const handleLinesBelowChange = useCallback((linesBelow: boolean) => {
-    readingLongMessage.current = linesBelow;
-  }, []);
+  // Set while the selected message is taller than the panel and not read to
+  // its end. State, not a ref: MessageView reports after each render, so for
+  // an arrival this render still holds the position from before it, which a
+  // new "↓ 1 more" row can't have changed yet.
+  const [readingLongMessage, setReadingLongMessage] = useState(false);
 
   // Reset message index to last message when chat changes or messages load
   // Track message counts per-chat to handle switching between chats correctly
@@ -650,7 +650,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const newMessageAdded = currentCount === prevCount + 1;
     // Only auto-scroll to new message if user was already at the bottom, and
     // not while a reaction picker is open on the current message
-    const wasAtBottom = prevCount === 0 || (messageIndex >= prevCount - 1 && !readingLongMessage.current);
+    const wasAtBottom = prevCount === 0 || (messageIndex >= prevCount - 1 && !readingLongMessage);
     const shouldScrollToNew = newMessageAdded && wasAtBottom && !state.reactionOverlay;
 
     if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
@@ -668,7 +668,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     if (chatId) {
       messageCounts.current[chatId] = currentCount;
     }
-  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages, state.reactionOverlay]);
+    // Re-running when readingLongMessage changes is a no-op: the counts already match
+  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages, state.reactionOverlay, readingLongMessage]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {
@@ -832,7 +833,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 onLoadOlder={loadOlderMessages}
                 reactionOverlay={state.reactionOverlay}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
-                onLinesBelowChange={handleLinesBelowChange}
+                onLinesBelowChange={setReadingLongMessage}
               />
             </Box>
             {isMinimal && state.connectionState !== "connected" && (
