@@ -31,7 +31,11 @@ export interface AppState {
   typingChats: Record<string, boolean>;
   drafts: Record<string, ChatDraft>;
   notice: Notice | null;
+  reactionOverlay: ReactionOverlay;
 }
+
+// The quick-reaction row under a message, or the full emoji grid
+export type ReactionOverlay = "picker" | "modal" | null;
 
 export type AppAction =
   | { type: "SET_CONNECTION_STATE"; payload: ConnectionState }
@@ -72,6 +76,7 @@ export type AppAction =
   // `text` is the text the result belongs to; results for an older edit are ignored
   | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; text: string; delivery: Delivery | undefined } }
   | { type: "DISCARD_UNSENT"; payload: { chatId: string; messageId: number } }
+  | { type: "SET_REACTION_OVERLAY"; payload: ReactionOverlay }
   | { type: "SHOW_NOTICE"; payload: Omit<Notice, "id"> }
   | { type: "CLEAR_NOTICE"; payload?: { id: number } }
   | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } }
@@ -105,7 +110,19 @@ export const initialState: AppState = {
   typingChats: {},
   drafts: {},
   notice: null,
+  reactionOverlay: null,
 };
+
+// An open overlay owns the keyboard: global shortcuts and panel navigation
+// must not reach the layers behind it.
+export function isOverlayOpen(state: AppState): boolean {
+  return (
+    state.showLogoutPrompt ||
+    state.currentView === "settings" ||
+    state.reactionOverlay !== null ||
+    state.mediaPanel.isOpen
+  );
+}
 
 function withSenderColors(
   senderColors: Record<string, SenderColors>,
@@ -484,6 +501,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         messages: { ...state.messages, [chatId]: messages.filter((m) => m.id !== messageId) },
       };
     }
+
+    case "SET_REACTION_OVERLAY":
+      return { ...state, reactionOverlay: action.payload };
 
     case "SHOW_NOTICE":
       return { ...state, notice: { ...action.payload, id: (state.notice?.id ?? 0) + 1 } };

@@ -44,7 +44,9 @@ function SettingsPanelInner() {
   }, [activeTab, layoutIndex, skinIndex, dispatch]);
 
   useInput((input, key) => {
-    if (key.leftArrow || key.rightArrow || key.tab) {
+    if (key.escape) {
+      dispatch({ type: "SET_CURRENT_VIEW", payload: "chat" });
+    } else if (key.leftArrow || key.rightArrow || key.tab) {
       setActiveTab((t) => (t === "layout" ? "skin" : "layout"));
     } else if (key.upArrow) {
       if (activeTab === "layout") setLayoutIndex((i) => Math.max(0, i - 1));

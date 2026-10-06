@@ -38,6 +38,7 @@ const mockDispatch = () => {};
 const mockSendReaction = async (_chatId: string, _messageId: number, _emoji: string) => true;
 const mockRemoveReaction = async (_chatId: string, _messageId: number) => true;
 const mockRetryDelivery = () => {};
+const mockLoadOlder = () => {};
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<AppProvider>{ui}</AppProvider>);
@@ -59,6 +60,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -79,6 +82,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -99,6 +104,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -118,6 +125,8 @@ describe("MessageView", () => {
       sendReaction: mockSendReaction,
       removeReaction: mockRemoveReaction,
       onRetryDelivery: mockRetryDelivery,
+      onLoadOlder: mockLoadOlder,
+      reactionOverlay: null,
     };
     const defaultFrame = renderWithProvider(<MessageView {...props} />).lastFrame() ?? "";
     const claudeCodeFrame =
@@ -149,6 +158,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -169,6 +180,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     // Snapshot will capture the styling including cyan color for "You"
@@ -199,6 +212,8 @@ describe("MessageView", () => {
         sendReaction={async () => true}
         removeReaction={async () => true}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />,
     );
     const frame = lastFrame() ?? "";
@@ -227,6 +242,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toContain("typing…");
@@ -249,6 +266,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).not.toContain("typing…");
@@ -282,6 +301,8 @@ describe("MessageView", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
         messageLayout="classic"
         isGroupChat={false}
       />
@@ -338,6 +359,8 @@ describe("MessageView empty state logo", () => {
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
         onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     ).lastFrame()!;
   }
