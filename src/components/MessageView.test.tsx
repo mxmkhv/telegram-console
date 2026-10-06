@@ -427,3 +427,48 @@ describe("MessageView empty state logo", () => {
     expect(frame).toContain("Select a chat to start");
   });
 });
+
+describe("MessageView day separators", () => {
+  const at = (id: number, date: Date, text: string): Message => ({
+    id,
+    senderId: "user1",
+    senderName: "Alice",
+    text,
+    timestamp: date,
+    isOutgoing: false,
+  });
+
+  it("labels each day once, sits on the bottom, and still fits", () => {
+    const today = new Date();
+    today.setHours(9, 0);
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const messages = [at(1, yesterday, "first"), at(2, yesterday, "second"), at(3, today, "third")];
+    const { lastFrame } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={2}
+        width={40}
+        height={20}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    const lines = (lastFrame() ?? "").split("\n");
+    const row = (text: string) => lines.findIndex((line) => line.includes(text));
+    expect(lines.filter((line) => line.includes("── Yesterday ──"))).toHaveLength(1);
+    expect(row("── Yesterday ──")).toBe(row("first") - 1);
+    expect(row("── Today ──")).toBe(row("third") - 1);
+    // Newest message is the last row inside the border
+    expect(row("third")).toBe(lines.length - 2);
+  });
+});
+

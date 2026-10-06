@@ -13,6 +13,7 @@ import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
 import { getSenderColor, type SenderColors } from "../utils/senderColor.js";
+import { formatDayLabel, formatTime, isSameDay } from "../utils/formatDate.js";
 
 interface MessageViewProps {
   isFocused: boolean;
@@ -39,14 +40,6 @@ interface MessageViewProps {
   onLoadOlder: () => void;
   reactionOverlay: ReactionOverlay;
   isTyping?: boolean;
-}
-
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
 }
 
 // Rows a line takes once Ink wraps it: Ink wraps with this same wrap-ansi call
@@ -388,15 +381,25 @@ function MessageViewInner({
   // Calculate line count for each message
   // panelDividers skins have no left/right border columns, only paddingX.
   const contentWidth = width - (skin.panelDividers ? 2 : 4);
+  // A day label above the first message of each day
+  const daySeparators = useMemo(() => {
+    const now = new Date();
+    return chatMessages.map((msg, index) => {
+      const previous = chatMessages[index - 1];
+      return previous && isSameDay(previous.timestamp, msg.timestamp) ? null : formatDayLabel(msg.timestamp, now);
+    });
+  }, [chatMessages]);
+
   const messageLineCounts = useMemo(() => {
     return chatMessages.map((msg, index) => {
       const isSelected = index === selectedIndex && isFocused;
+      const separatorRows = daySeparators[index] ? 1 : 0;
       if (messageLayout === "bubble") {
-        return getBubbleMessageLineCount(msg, isSelected, isGroupChat, contentWidth);
+        return separatorRows + getBubbleMessageLineCount(msg, isSelected, isGroupChat, contentWidth);
       }
-      return getMessageLineCount(msg, isSelected, contentWidth);
+      return separatorRows + getMessageLineCount(msg, isSelected, contentWidth);
     });
-  }, [chatMessages, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
+  }, [chatMessages, daySeparators, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
 
   const totalLines = useMemo(() => {
     return messageLineCounts.reduce((sum, count) => sum + count, 0);
@@ -497,6 +500,57 @@ function MessageViewInner({
     return isMsgFlashing(messageId) ? FLASH_CONFIG.messageColor : undefined;
   };
 
+  // Render a single message in classic layout
+  const renderClassicMessage = (msg: Message, isSelected: boolean) => {
+    const flashColor = getFlashColor(msg.id);
+    const [first = "", ...rest] = msg.text.split("\n");
+    const firstLine = getClassicFirstLine(msg, first, isSelected);
+    return (
+      <Box flexDirection="column">
+        <Text wrap="wrap" backgroundColor={flashColor}>
+          <Text inverse={isSelected} dimColor={!isSelected}>
+            {firstLine.time}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.reply}
+          </Text>
+          <Text
+            inverse={isSelected}
+            bold
+            // No color when selected: inverse carries it
+            color={isSelected ? undefined : msg.isOutgoing ? "blue" : colorForSender(msg.senderId)}
+          >
+            {firstLine.name}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.media}
+          </Text>
+          <Text inverse={isSelected}>{firstLine.text}</Text>
+          <Text inverse={isSelected} color="yellow">
+            {firstLine.viewHint}
+          </Text>
+          <Text inverse={isSelected}>{firstLine.reactions}</Text>
+          <Text
+            inverse={isSelected}
+            color={msg.delivery?.status === "failed" ? "red" : undefined}
+            dimColor={msg.delivery?.status === "pending"}
+          >
+            {firstLine.delivery}
+          </Text>
+          <Text inverse={isSelected} color="yellow">
+            {firstLine.retryHint}
+          </Text>
+        </Text>
+        {rest.map((line, lineIndex) => (
+          <Text key={lineIndex} wrap="wrap" backgroundColor={flashColor} inverse={isSelected} dimColor={!isSelected}>
+            {CONTINUATION_INDENT}
+            {line}
+          </Text>
+        ))}
+      </Box>
+    );
+  };
+
   // Render a single message in bubble layout
   const renderBubbleMessage = (msg: Message, isSelected: boolean) => {
     const showName = isGroupChat && !msg.isOutgoing;
@@ -505,7 +559,7 @@ function MessageViewInner({
     const flashColor = getFlashColor(msg.id);
 
     return (
-      <Box key={msg.id} flexDirection="column">
+      <Box flexDirection="column">
         {/* Sender name (groups only, others only) - with unique color */}
         {showName && (
           <Text color={colorForSender(msg.senderId)}>{msg.senderName || "Unknown"}</Text>
@@ -591,6 +645,8 @@ function MessageViewInner({
       </Box>
       <Box
         flexDirection="column"
+        // Conversations sit on the input, like every chat app
+        justifyContent="flex-end"
         paddingX={1}
         height={visibleLines}
         overflowY="hidden"
@@ -602,91 +658,35 @@ function MessageViewInner({
         {showScrollUp && !isLoadingOlder && !canLoadOlder && (
           <Text dimColor> ↑ {startIndex} earlier</Text>
         )}
-        {messageLayout === "bubble"
-          ? // Bubble layout rendering
-            visibleMessages.map((msg, i) => {
-              const actualIndex = startIndex + i;
-              const isSelected = actualIndex === selectedIndex && isFocused;
-              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
-                return (
-                  <ReactionPicker
-                    key={msg.id}
-                    emojis={QUICK_EMOJIS}
-                    selectedIndex={reactionPickerIndex}
-                    onSelect={handleSendReaction}
-                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
-                    onCancel={() => setReactionOverlay(null)}
-                  />
-                );
-              }
-              return renderBubbleMessage(msg, isSelected);
-            })
-          : // Classic layout rendering (existing code)
-            visibleMessages.map((msg, i) => {
-              const actualIndex = startIndex + i;
-              const isSelected = actualIndex === selectedIndex && isFocused;
-              const flashColor = getFlashColor(msg.id);
-
-              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
-                return (
-                  <ReactionPicker
-                    key={msg.id}
-                    emojis={QUICK_EMOJIS}
-                    selectedIndex={reactionPickerIndex}
-                    onSelect={handleSendReaction}
-                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
-                    onCancel={() => setReactionOverlay(null)}
-                  />
-                );
-              }
-
-              const [first = "", ...rest] = msg.text.split("\n");
-              const firstLine = getClassicFirstLine(msg, first, isSelected);
-              return (
-                <Box key={msg.id} flexDirection="column" flexShrink={0}>
-                  <Text wrap="wrap" backgroundColor={flashColor}>
-                    <Text inverse={isSelected} dimColor={!isSelected}>
-                      {firstLine.time}
-                    </Text>
-                    <Text inverse={isSelected} dimColor>
-                      {firstLine.reply}
-                    </Text>
-                    <Text
-                      inverse={isSelected}
-                      bold
-                      // No color when selected: inverse carries it
-                      color={isSelected ? undefined : msg.isOutgoing ? "blue" : colorForSender(msg.senderId)}
-                    >
-                      {firstLine.name}
-                    </Text>
-                    <Text inverse={isSelected} dimColor>
-                      {firstLine.media}
-                    </Text>
-                    <Text inverse={isSelected}>{firstLine.text}</Text>
-                    <Text inverse={isSelected} color="yellow">
-                      {firstLine.viewHint}
-                    </Text>
-                    <Text inverse={isSelected}>{firstLine.reactions}</Text>
-                    <Text
-                      inverse={isSelected}
-                      color={msg.delivery?.status === "failed" ? "red" : undefined}
-                      dimColor={msg.delivery?.status === "pending"}
-                    >
-                      {firstLine.delivery}
-                    </Text>
-                    <Text inverse={isSelected} color="yellow">
-                      {firstLine.retryHint}
-                    </Text>
+        {visibleMessages.map((msg, i) => {
+          const actualIndex = startIndex + i;
+          const isSelected = actualIndex === selectedIndex && isFocused;
+          const daySeparator = daySeparators[actualIndex];
+          return (
+            <Box key={msg.id} flexDirection="column" flexShrink={0}>
+              {daySeparator && (
+                <Box justifyContent="center">
+                  <Text dimColor wrap="truncate">
+                    ── {daySeparator} ──
                   </Text>
-                  {rest.map((line, lineIndex) => (
-                    <Text key={lineIndex} wrap="wrap" backgroundColor={flashColor} inverse={isSelected} dimColor={!isSelected}>
-                      {CONTINUATION_INDENT}
-                      {line}
-                    </Text>
-                  ))}
                 </Box>
-              );
-            })}
+              )}
+              {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
+                <ReactionPicker
+                  emojis={QUICK_EMOJIS}
+                  selectedIndex={reactionPickerIndex}
+                  onSelect={handleSendReaction}
+                  onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+                  onCancel={() => setReactionOverlay(null)}
+                />
+              ) : messageLayout === "bubble" ? (
+                renderBubbleMessage(msg, isSelected)
+              ) : (
+                renderClassicMessage(msg, isSelected)
+              )}
+            </Box>
+          );
+        })}
         {showScrollDown && (
           <Text dimColor inverse={isIndicatorFlashing("scroll-indicator")}>
             {" "}↓ {chatMessages.length - endIndex} more
