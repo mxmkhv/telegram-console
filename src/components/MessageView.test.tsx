@@ -338,6 +338,50 @@ describe("countWrappedLines", () => {
     // " abc" is 4 chars at width 3 -> at least 2 rows
     expect(countWrappedLines(" abc", 3)).toBe(2);
   });
+
+  it("measures emoji and CJK in terminal columns", () => {
+    // 6 characters, 12 columns
+    expect(countWrappedLines("中文中文中文", 6)).toBe(2);
+    expect(countWrappedLines("🚀🚀🚀", 4)).toBe(2);
+  });
+
+  it("starts a long word on the current row when Ink does", () => {
+    expect(countWrappedLines("Tesla bb supercalifragilistic", 18)).toBe(2);
+  });
+});
+
+describe("MessageView wide characters", () => {
+  it("keeps the newest message visible when CJK text wraps", () => {
+    const cjk = (id: number, text: string): Message => ({
+      id,
+      senderId: "user1",
+      senderName: "Alice",
+      text,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    });
+    const messages = [cjk(1, "中文中文中文中文中文"), cjk(2, "中文中文中文中文中文"), cjk(3, "最后的消息最后的消息")];
+    const { lastFrame } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={2}
+        width={34}
+        height={8}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    expect(lastFrame()).toContain("最后的消息");
+  });
 });
 
 describe("MessageView empty state logo", () => {
