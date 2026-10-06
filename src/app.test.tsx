@@ -496,6 +496,40 @@ describe("MainApp help overlay", () => {
   });
 });
 
+describe("MainApp connection drops", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+
+  it("shows a dropped connection and reloads chats once it's back", async () => {
+    const { lastFrame } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    expect(lastFrame()).toContain("[Connected]");
+    let chatLoads = 0;
+    const getChats = svc.getChats.bind(svc);
+    svc.getChats = () => {
+      chatLoads++;
+      return getChats();
+    };
+
+    svc.simulateConnectionDrop();
+    await wait();
+    expect(lastFrame()).toContain("[Connecting...]");
+    expect(chatLoads).toBe(0);
+
+    svc.simulateConnectionRestore();
+    await wait();
+    expect(lastFrame()).toContain("[Connected]");
+    expect(chatLoads).toBe(1);
+  });
+});
+
 describe("MainApp navigation keys", () => {
   let svc: ReturnType<typeof createMockTelegramService>;
   beforeEach(() => { svc = createMockTelegramService(); });

@@ -242,6 +242,24 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     setLoadAttempt((n) => n + 1);
   }, [initFailed, retryInit, dispatch]);
 
+  // Messages sent while the connection was down never arrive as updates, so
+  // reload the chat list and the open chat once it's back
+  const connectionDropped = useRef(false);
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    if (state.connectionState !== "connected") {
+      connectionDropped.current = true;
+      return;
+    }
+    if (!connectionDropped.current) return;
+    connectionDropped.current = false;
+    telegramService.getChats().then(
+      (chats) => dispatch({ type: "SET_CHATS", payload: chats }),
+      (err: unknown) => showError(`Reconnected, but couldn't refresh your chats; new messages still arrive (${describeError(err)})`),
+    );
+    if (stateRef.current.selectedChatId) setLoadAttempt((n) => n + 1);
+  }, [state.connectionState, chatsLoaded, telegramService, dispatch, showError]);
+
   // Focus media panel when it opens
   useEffect(() => {
     if (state.mediaPanel.isOpen) {
