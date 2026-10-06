@@ -199,7 +199,12 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
 
     async connect() {
       setConnectionState("connecting");
-      await client.connect();
+      try {
+        await client.connect();
+      } catch (err) {
+        setConnectionState("disconnected");
+        throw err;
+      }
       setConnectionState("connected");
       onSessionUpdate?.(String(client.session.save()));
 

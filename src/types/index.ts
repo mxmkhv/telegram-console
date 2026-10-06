@@ -71,6 +71,21 @@ export interface Message {
   reactions?: MessageReaction[];
   replyToMsgId?: number;        // ID of message this replies to
   replyToSenderName?: string;   // Sender name for display
+  delivery?: Delivery;          // Set while a send/edit from this client is unconfirmed
+}
+
+// A send or edit made from this client that Telegram hasn't confirmed yet.
+// Unsent messages carry a negative local id until the server assigns one.
+export type Delivery =
+  | { action: "send"; status: "pending" | "failed" }
+  | { action: "edit"; status: "pending" | "failed"; originalText: string };
+
+// Transient feedback line above the input. Sticky notices stay until replaced.
+export interface Notice {
+  id: number;
+  kind: "error" | "info";
+  text: string;
+  sticky?: boolean;
 }
 
 // Unsent input for a chat, kept in memory for the session

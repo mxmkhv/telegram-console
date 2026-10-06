@@ -37,6 +37,7 @@ const mockMessages: Message[] = [
 const mockDispatch = () => {};
 const mockSendReaction = async (_chatId: string, _messageId: number, _emoji: string) => true;
 const mockRemoveReaction = async (_chatId: string, _messageId: number) => true;
+const mockRetryDelivery = () => {};
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<AppProvider>{ui}</AppProvider>);
@@ -57,6 +58,7 @@ describe("MessageView", () => {
         chatId={null}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -76,6 +78,7 @@ describe("MessageView", () => {
         chatId={null}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -95,6 +98,7 @@ describe("MessageView", () => {
         chatId="chat1"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -113,6 +117,7 @@ describe("MessageView", () => {
       chatId: "chat1",
       sendReaction: mockSendReaction,
       removeReaction: mockRemoveReaction,
+      onRetryDelivery: mockRetryDelivery,
     };
     const defaultFrame = renderWithProvider(<MessageView {...props} />).lastFrame() ?? "";
     const claudeCodeFrame =
@@ -143,6 +148,7 @@ describe("MessageView", () => {
         chatId="chat1"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -162,6 +168,7 @@ describe("MessageView", () => {
         chatId="chat1"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     // Snapshot will capture the styling including cyan color for "You"
@@ -191,6 +198,7 @@ describe("MessageView", () => {
         chatId="1"
         sendReaction={async () => true}
         removeReaction={async () => true}
+        onRetryDelivery={mockRetryDelivery}
       />,
     );
     const frame = lastFrame() ?? "";
@@ -218,6 +226,7 @@ describe("MessageView", () => {
         isTyping={true}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     expect(lastFrame()).toContain("typing…");
@@ -239,6 +248,7 @@ describe("MessageView", () => {
         isTyping={false}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     );
     expect(lastFrame()).not.toContain("typing…");
@@ -271,6 +281,7 @@ describe("MessageView", () => {
         chatId="test-chat"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
         messageLayout="classic"
         isGroupChat={false}
       />
@@ -326,6 +337,7 @@ describe("MessageView empty state logo", () => {
         chatId={null}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
       />
     ).lastFrame()!;
   }

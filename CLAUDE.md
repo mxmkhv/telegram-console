@@ -106,6 +106,7 @@ TG_AUTH_METHOD    # "qr" | "phone"
 TG_MESSAGE_LAYOUT # "classic" | "bubble"
 TG_SKIN           # "default" | "claudeCode"
 TG_LOG_LEVEL      # "quiet" | "info" | "verbose"
+TG_MOCK_FAIL      # --mock only: comma list of send,edit,connect,getMessages to fail
 ```
 
 Config stored at `~/.config/telegram-console/config.json`

@@ -33,6 +33,7 @@ interface MessageViewProps {
     emoji: string,
   ) => Promise<boolean>;
   removeReaction: (chatId: string, messageId: number) => Promise<boolean>;
+  onRetryDelivery: (chatId: string, message: Message) => void;
   isTyping?: boolean;
 }
 
@@ -90,11 +91,28 @@ function formatReactions(reactions: Message["reactions"]): string {
   );
 }
 
+// "…" while a send/edit is in flight, "!" once it failed
+function formatDelivery(msg: Message): string {
+  if (!msg.delivery) return "";
+  if (msg.delivery.status === "pending") return " …";
+  return msg.delivery.action === "send" ? " ! not sent" : " ! edit not saved";
+}
+
+function formatRetryHint(msg: Message, isSelected: boolean): string {
+  if (!isSelected || msg.delivery?.status !== "failed") return "";
+  return msg.delivery.action === "send" ? " [Enter: retry · x: discard]" : " [Enter: retry · x: undo]";
+}
+
+// Unsent messages have no server id yet, so they can't be replied or reacted to
+function isUnsent(msg: Message): boolean {
+  return msg.delivery?.action === "send";
+}
+
 function hasUserReaction(reactions: Message["reactions"]): boolean {
   return reactions?.some((r) => r.hasUserReacted) ?? false;
 }
 
-function getMessageLineCount(msg: Message, _isSelected: boolean, availableWidth: number): number {
+function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: number): number {
   const lines = msg.text.split("\n");
   if (availableWidth <= 0) return lines.length;
   // The first rendered line carries the "[HH:MM] Sender: " prefix (+ optional reply
@@ -105,7 +123,8 @@ function getMessageLineCount(msg: Message, _isSelected: boolean, availableWidth:
   const replyPrefix = msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}: ` : "";
   const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : "";
   const firstPrefix = `[${formatTime(msg.timestamp)}] ${replyPrefix}${senderName}:${mediaInfo} `;
-  const reactions = formatReactions(msg.reactions);
+  const reactions =
+    formatReactions(msg.reactions) + formatDelivery(msg) + formatRetryHint(msg, isSelected);
   let total = 0;
   for (let i = 0; i < lines.length; i++) {
     const content = i === 0 ? firstPrefix + lines[i] + reactions : "        " + lines[i];
@@ -147,6 +166,7 @@ function MessageViewInner({
   setSelectedIndex,
   sendReaction,
   removeReaction,
+  onRetryDelivery,
   isTyping,
 }: MessageViewProps) {
   const skin = useSkin();
@@ -203,7 +223,7 @@ function MessageViewInner({
       // Shift+R for reply (uppercase R)
       if (input === "R") {
         const selectedMessage = chatMessages[selectedIndex];
-        if (selectedMessage) {
+        if (selectedMessage && !isUnsent(selectedMessage)) {
           dispatch({ type: "SET_REPLYING_TO", payload: selectedMessage });
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
         }
@@ -213,7 +233,7 @@ function MessageViewInner({
       // 'r' key for reactions (lowercase only now)
       if (input === "r") {
         const selectedMessage = chatMessages[selectedIndex];
-        if (selectedMessage) {
+        if (selectedMessage && !isUnsent(selectedMessage)) {
           if (hasUserReaction(selectedMessage.reactions)) {
             handleRemoveReaction(selectedMessage.id);
           } else {
@@ -224,9 +244,24 @@ function MessageViewInner({
         return;
       }
 
-      // Enter handling: reply navigation OR media panel
+      // Discard a failed send, or undo a failed edit
+      if (input === "x") {
+        const selectedMessage = chatMessages[selectedIndex];
+        if (selectedMessage?.delivery?.status === "failed" && chatId) {
+          dispatch({ type: "DISCARD_UNSENT", payload: { chatId, messageId: selectedMessage.id } });
+          dispatch({ type: "CLEAR_NOTICE" });
+        }
+        return;
+      }
+
+      // Enter handling: retry failed delivery, reply navigation OR media panel
       if (key.return) {
         const selectedMessage = chatMessages[selectedIndex];
+
+        if (selectedMessage?.delivery?.status === "failed" && chatId) {
+          onRetryDelivery(chatId, selectedMessage);
+          return;
+        }
 
         // If this is a reply message, navigate to original
         if (selectedMessage?.replyToMsgId && setSelectedIndex) {
@@ -459,6 +494,9 @@ function MessageViewInner({
     const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
     const viewHint = isSelected && msg.media ? " [Enter]" : "";
     const timestamp = `[${formatTime(msg.timestamp)}]`;
+    const delivery = formatDelivery(msg);
+    const retryHint = formatRetryHint(msg, isSelected);
+    const deliveryColor = msg.delivery?.status === "failed" ? "red" : undefined;
     const senderColor = colorForSender(msg.senderId);
     const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
     const flashColor = isFlashing ? flashState?.color : undefined;
@@ -491,7 +529,7 @@ function MessageViewInner({
           }
 
           // Add timestamp to end of last line
-          const suffix = isLastLine ? ` ${timestamp}` : "";
+          const suffix = isLastLine ? ` ${timestamp}${delivery}${retryHint}` : "";
           const fullContent = lineContent + suffix;
 
           if (msg.isOutgoing) {
@@ -506,6 +544,8 @@ function MessageViewInner({
                 {" ".repeat(padding)}
                 <Text color={isSelected ? undefined : "blue"}>{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
+                {isLastLine && <Text color={deliveryColor} dimColor={!deliveryColor}>{delivery}</Text>}
+                {isLastLine && <Text color="yellow">{retryHint}</Text>}
                 {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
               </Text>
             );
@@ -519,6 +559,8 @@ function MessageViewInner({
               >
                 <Text>{lineContent}</Text>
                 {isLastLine && <Text dimColor> {timestamp}</Text>}
+                {isLastLine && <Text color={deliveryColor} dimColor={!deliveryColor}>{delivery}</Text>}
+                {isLastLine && <Text color="yellow">{retryHint}</Text>}
                 {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
               </Text>
             );
@@ -680,6 +722,16 @@ function MessageViewInner({
                             </Text>
                             <Text inverse={isSelected}>
                               {formatReactions(msg.reactions)}
+                            </Text>
+                            <Text
+                              inverse={isSelected}
+                              color={msg.delivery?.status === "failed" ? "red" : undefined}
+                              dimColor={msg.delivery?.status === "pending"}
+                            >
+                              {formatDelivery(msg)}
+                            </Text>
+                            <Text inverse={isSelected} color="yellow">
+                              {formatRetryHint(msg, isSelected)}
                             </Text>
                           </>
                         ) : (

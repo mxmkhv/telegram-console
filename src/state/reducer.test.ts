@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { appReducer, initialState } from "./reducer";
+import type { Message } from "../types";
 
 describe("appReducer", () => {
   it("sets connection state", () => {
@@ -462,5 +463,69 @@ describe("drafts", () => {
   it("RESET_STATE clears drafts", () => {
     const saved = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("hi") } });
     expect(appReducer(saved, { type: "RESET_STATE" }).drafts).toEqual({});
+  });
+});
+
+describe("appReducer delivery", () => {
+  const sent = (id: number, text = "hi"): Message => ({
+    id,
+    senderId: "me",
+    senderName: "You",
+    text,
+    timestamp: new Date(),
+    isOutgoing: true,
+  });
+  const pending = (id: number): Message => ({ ...sent(id), delivery: { action: "send", status: "pending" } });
+  const withMessages = (messages: Message[]) =>
+    appReducer(
+      appReducer(initialState, { type: "SET_CHATS", payload: [{ id: "1", title: "A", unreadCount: 0, isGroup: false }] }),
+      { type: "SET_MESSAGES", payload: { chatId: "1", messages } },
+    );
+
+  it("CONFIRM_MESSAGE swaps the local message for Telegram's copy", () => {
+    const state = appReducer(appReducer(withMessages([]), { type: "ADD_MESSAGE", payload: { chatId: "1", message: pending(-1) } }), {
+      type: "CONFIRM_MESSAGE",
+      payload: { chatId: "1", localId: -1, message: sent(42) },
+    });
+    expect(state.messages["1"]!.map((m) => m.id)).toEqual([42]);
+    expect(state.messages["1"]![0]!.delivery).toBeUndefined();
+    expect(state.chats[0]!.lastMessage?.id).toBe(42);
+  });
+
+  it("CONFIRM_MESSAGE drops the local copy if the real message already arrived", () => {
+    const state = appReducer(withMessages([pending(-1), sent(42)]), {
+      type: "CONFIRM_MESSAGE",
+      payload: { chatId: "1", localId: -1, message: sent(42) },
+    });
+    expect(state.messages["1"]!.map((m) => m.id)).toEqual([42]);
+  });
+
+  it("SET_MESSAGES keeps unconfirmed sends and edits", () => {
+    const failedEdit: Message = { ...sent(2, "new"), delivery: { action: "edit", status: "failed", originalText: "old" } };
+    const state = appReducer(withMessages([sent(1), failedEdit, pending(-1)]), {
+      type: "SET_MESSAGES",
+      payload: { chatId: "1", messages: [sent(1), sent(2, "old")] },
+    });
+    expect(state.messages["1"]!.map((m) => [m.id, m.text])).toEqual([[1, "hi"], [2, "new"], [-1, "hi"]]);
+  });
+
+  it("DISCARD_UNSENT removes a failed send", () => {
+    const failed: Message = { ...sent(-1), delivery: { action: "send", status: "failed" } };
+    const state = appReducer(withMessages([sent(1), failed]), { type: "DISCARD_UNSENT", payload: { chatId: "1", messageId: -1 } });
+    expect(state.messages["1"]!.map((m) => m.id)).toEqual([1]);
+  });
+
+  it("DISCARD_UNSENT reverts a failed edit to the original text", () => {
+    const failedEdit: Message = { ...sent(2, "new"), delivery: { action: "edit", status: "failed", originalText: "old" } };
+    const state = appReducer(withMessages([failedEdit]), { type: "DISCARD_UNSENT", payload: { chatId: "1", messageId: 2 } });
+    expect(state.messages["1"]![0]!.text).toBe("old");
+    expect(state.messages["1"]![0]!.delivery).toBeUndefined();
+  });
+
+  it("CLEAR_NOTICE with a stale id keeps the newer notice", () => {
+    const first = appReducer(initialState, { type: "SHOW_NOTICE", payload: { kind: "error", text: "one" } });
+    const second = appReducer(first, { type: "SHOW_NOTICE", payload: { kind: "error", text: "two" } });
+    expect(appReducer(second, { type: "CLEAR_NOTICE", payload: { id: first.notice!.id } }).notice?.text).toBe("two");
+    expect(appReducer(second, { type: "CLEAR_NOTICE", payload: { id: second.notice!.id } }).notice).toBeNull();
   });
 });

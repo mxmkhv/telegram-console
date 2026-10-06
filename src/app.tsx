@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { unlink } from "node:fs/promises";
 import { useInput, useApp as useInkApp } from "ink";
 import { Box, Text } from "./components/ui";
@@ -20,12 +20,14 @@ import { LogoutPrompt } from "./components/LogoutPrompt";
 import { MediaPanel } from "./components/MediaPanel";
 import { BlankScreen } from "./components/BlankScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { NoticeLine } from "./components/NoticeLine";
+import { describeError } from "./utils/describeError";
 import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
 import { createTelegramService } from "./services/telegram";
-import { createMockTelegramService } from "./services/telegram.mock";
+import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, Message } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
@@ -94,15 +96,58 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [telegramService]
   );
 
-  // Initialize connection and load chats
+  // Latest state for async callbacks that resolve after later renders
+  const stateRef = useRef(state);
   useEffect(() => {
-    const init = async () => {
-      await telegramService.connect();
-      const chats = await telegramService.getChats();
-      dispatch({ type: "SET_CHATS", payload: chats });
-    };
-    init();
+    stateRef.current = state;
+  });
 
+  // Messages sent from here get a negative local id until Telegram assigns one
+  const nextLocalId = useRef(-1);
+
+  const showError = useCallback(
+    (text: string, sticky?: boolean) => {
+      dispatch({ type: "SHOW_NOTICE", payload: { kind: "error", text, sticky } });
+    },
+    [dispatch]
+  );
+
+  const handleNoticeExpire = useCallback(
+    (id: number) => dispatch({ type: "CLEAR_NOTICE", payload: { id } }),
+    [dispatch]
+  );
+
+  // Initialize connection and load chats. Bumping connectAttempt retries.
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const [initFailed, setInitFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const init = async () => {
+      let step = "connect to Telegram";
+      try {
+        await telegramService.connect();
+        step = "load your chats";
+        const chats = await telegramService.getChats();
+        if (!cancelled) dispatch({ type: "SET_CHATS", payload: chats });
+      } catch (err) {
+        if (cancelled) return;
+        setInitFailed(true);
+        showError(`Couldn't ${step}: press Ctrl+R to retry (${describeError(err)})`, true);
+      }
+    };
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [telegramService, connectAttempt, dispatch, showError]);
+
+  const retryInit = useCallback(() => {
+    setInitFailed(false);
+    dispatch({ type: "CLEAR_NOTICE" });
+    setConnectAttempt((n) => n + 1);
+  }, [dispatch]);
+
+  useEffect(() => {
     const unsubConnection = telegramService.onConnectionStateChange((connectionState) => {
       dispatch({ type: "SET_CONNECTION_STATE", payload: connectionState });
     });
@@ -128,7 +173,13 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
     const chatId = state.selectedChatId;
     const loadMessages = async () => {
-      const messages = await telegramService.getMessages(chatId);
+      let messages: Message[];
+      try {
+        messages = await telegramService.getMessages(chatId);
+      } catch (err) {
+        showError(`Couldn't load messages: switch to another chat and back to retry (${describeError(err)})`);
+        return;
+      }
       dispatch({
         type: "SET_MESSAGES",
         payload: { chatId, messages },
@@ -145,8 +196,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       }
     };
 
-    loadMessages();
-  }, [state.selectedChatId, telegramService, dispatch]);
+    void loadMessages();
+  }, [state.selectedChatId, telegramService, dispatch, showError]);
 
   // Focus media panel when it opens
   useEffect(() => {
@@ -163,19 +214,83 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [dispatch]
   );
 
-  const handleSendMessage = useCallback(
-    async (text: string, chatId: string) => {
-      const replyToMsgId = state.replyingToMessage?.id;
-      const replyToSenderName = state.replyingToMessage?.senderName;
-      const message = await telegramService.sendMessage(chatId, text, replyToMsgId, replyToSenderName);
-      dispatch({
-        type: "ADD_MESSAGE",
-        payload: { chatId, message },
-      });
-      // No reply clear here: InputBar cancels it on Enter, and by the time the
-      // send resolves the user may have restored another chat's reply draft.
+  // Sends the local message and swaps in Telegram's copy once it's accepted
+  const deliverSend = useCallback(
+    async (chatId: string, local: Message) => {
+      try {
+        const message = await telegramService.sendMessage(
+          chatId,
+          local.text,
+          local.replyToMsgId,
+          local.replyToSenderName
+        );
+        dispatch({ type: "CONFIRM_MESSAGE", payload: { chatId, localId: local.id, message } });
+      } catch (err) {
+        dispatch({
+          type: "SET_DELIVERY",
+          payload: { chatId, messageId: local.id, delivery: { action: "send", status: "failed" } },
+        });
+        showError(`Message not sent: Esc, then Enter on it to retry or x to discard (${describeError(err)})`);
+      }
     },
-    [telegramService, dispatch, state.replyingToMessage]
+    [telegramService, dispatch, showError]
+  );
+
+  const deliverEdit = useCallback(
+    async (chatId: string, messageId: number, text: string, originalText: string) => {
+      try {
+        await telegramService.editMessage(chatId, messageId, text);
+        dispatch({ type: "SET_DELIVERY", payload: { chatId, messageId, delivery: undefined } });
+      } catch (err) {
+        dispatch({
+          type: "SET_DELIVERY",
+          payload: { chatId, messageId, delivery: { action: "edit", status: "failed", originalText } },
+        });
+        showError(`Edit not saved: Esc, then Enter on it to retry or x to undo (${describeError(err)})`);
+      }
+    },
+    [telegramService, dispatch, showError]
+  );
+
+  // Shows the message right away as pending; failure keeps it in the list
+  // marked as not sent, so typed text is never lost.
+  const handleSendMessage = useCallback(
+    (text: string, chatId: string) => {
+      // No reply clear here: InputBar cancels it on Enter
+      const replyTo = state.replyingToMessage;
+      const local: Message = {
+        id: nextLocalId.current--,
+        senderId: "me",
+        senderName: "You",
+        text,
+        timestamp: new Date(),
+        isOutgoing: true,
+        replyToMsgId: replyTo?.id,
+        replyToSenderName: replyTo?.senderName,
+        delivery: { action: "send", status: "pending" },
+      };
+      dispatch({ type: "ADD_MESSAGE", payload: { chatId, message: local } });
+      void deliverSend(chatId, local);
+    },
+    [dispatch, deliverSend, state.replyingToMessage]
+  );
+
+  const handleRetryDelivery = useCallback(
+    (chatId: string, message: Message) => {
+      const { delivery } = message;
+      if (delivery?.status !== "failed") return;
+      dispatch({ type: "CLEAR_NOTICE" });
+      dispatch({
+        type: "SET_DELIVERY",
+        payload: { chatId, messageId: message.id, delivery: { ...delivery, status: "pending" } },
+      });
+      if (delivery.action === "send") {
+        void deliverSend(chatId, message);
+      } else {
+        void deliverEdit(chatId, message.id, message.text, delivery.originalText);
+      }
+    },
+    [dispatch, deliverSend, deliverEdit]
   );
 
   const handleSendImage = useCallback(
@@ -188,8 +303,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         const message = await telegramService.sendImage(chatId, path);
         dispatch({ type: "ADD_MESSAGE", payload: { chatId, message } });
         return { ok: true };
-      } catch {
-        return { ok: false, error: "Failed to send image" };
+      } catch (err) {
+        return { ok: false, error: `Image not sent (${describeError(err)})` };
       } finally {
         if (isTemp) {
           unlink(path).catch(() => {});
@@ -199,19 +314,26 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [telegramService, dispatch]
   );
 
+  // Applies the edit right away; failure keeps the new text marked as not saved
   const handleEditMessage = useCallback(
-    async (text: string, chatId: string, messageId: number) => {
-      try {
-        await telegramService.editMessage(chatId, messageId, text);
-        dispatch({
-          type: "UPDATE_MESSAGE",
-          payload: { chatId, messageId, newText: text },
-        });
-      } catch {
-        // Edit failed - could add error flash here
-      }
+    (text: string, chatId: string, messageId: number) => {
+      const message = stateRef.current.messages[chatId]?.find((m) => m.id === messageId);
+      if (!message) return;
+      // Re-editing an unsaved edit keeps the text Telegram actually has
+      const originalText =
+        message.delivery?.action === "edit" ? message.delivery.originalText : message.text;
+      dispatch({
+        type: "UPDATE_MESSAGE",
+        payload: {
+          chatId,
+          messageId,
+          newText: text,
+          delivery: { action: "edit", status: "pending", originalText },
+        },
+      });
+      void deliverEdit(chatId, messageId, text, originalText);
     },
-    [telegramService, dispatch]
+    [dispatch, deliverEdit]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -237,7 +359,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   // Dynamic height budget
   const isMinimal = state.uiMode === "minimal";
   const modeIndicatorVisible = !!(state.replyingToMessage || state.editingMessage);
-  const inputReserved = 3 + (modeIndicatorVisible ? 1 : 0);
+  const inputReserved = 3 + (modeIndicatorVisible ? 1 : 0) + (state.notice ? 1 : 0);
   // panelDividers skins replace HeaderBar/StatusBar's round border (2 rows)
   // with a single 1-row rule, so each panel is 1 row shorter.
   const panelRows = getSkin(state.skin).panelDividers ? 2 : 3;
@@ -259,6 +381,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       // Ctrl+C always exits
       if (key.ctrl && input === "c") {
         exit();
+        return;
+      }
+
+      if (key.ctrl && input === "r" && initFailed) {
+        retryInit();
         return;
       }
 
@@ -385,9 +512,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
   // Escape to exit input mode (only active when input is focused)
   useInput(
-    (_input, key) => {
+    (input, key) => {
       if (key.escape) {
         dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
+      } else if (key.ctrl && input === "r" && initFailed) {
+        retryInit();
       }
     },
     { isActive: state.focusedPanel === "input" && !state.isHidden }
@@ -417,7 +546,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   );
 
   const handleStartEdit = useCallback(() => {
-    const lastOutgoing = [...currentMessages].reverse().find((m) => m.isOutgoing);
+    // Unsent messages have no server id to edit
+    const lastOutgoing = currentMessages.findLast((m) => m.isOutgoing && m.delivery?.action !== "send");
     if (lastOutgoing) {
       dispatch({ type: "SET_EDITING_MESSAGE", payload: lastOutgoing });
     }
@@ -482,19 +612,25 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
     dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: true } });
 
-    telegramService.getMessages(chatId, 50, oldestMessage.id).then((olderMessages) => {
-      if (olderMessages.length > 0) {
-        dispatch({ type: "PREPEND_MESSAGES", payload: { chatId, messages: olderMessages } });
-        // Adjust messageIndex to maintain position
-        setMessageIndex((prev) => prev + olderMessages.length);
+    telegramService.getMessages(chatId, 50, oldestMessage.id).then(
+      (olderMessages) => {
+        if (olderMessages.length > 0) {
+          dispatch({ type: "PREPEND_MESSAGES", payload: { chatId, messages: olderMessages } });
+          // Adjust messageIndex to maintain position
+          setMessageIndex((prev) => prev + olderMessages.length);
+        }
+        dispatch({
+          type: "SET_HAS_MORE_MESSAGES",
+          payload: { chatId, hasMore: olderMessages.length === 50 },
+        });
+        dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
+      },
+      (err: unknown) => {
+        dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
+        showError(`Couldn't load older messages: press Enter to retry (${describeError(err)})`);
       }
-      dispatch({
-        type: "SET_HAS_MORE_MESSAGES",
-        payload: { chatId, hasMore: olderMessages.length === 50 },
-      });
-      dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
-    });
-  }, [state.selectedChatId, canLoadOlder, currentMessages, telegramService, dispatch]);
+    );
+  }, [state.selectedChatId, canLoadOlder, currentMessages, telegramService, dispatch, showError]);
 
   // Memoize focus booleans to prevent unnecessary child re-renders
   const isHeaderFocused = state.focusedPanel === "header";
@@ -590,6 +726,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 senderColors={state.selectedChatId ? state.senderColors[state.selectedChatId] : undefined}
                 sendReaction={sendReaction}
                 removeReaction={removeReaction}
+                onRetryDelivery={handleRetryDelivery}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
               />
             </Box>
@@ -600,6 +737,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 </Text>
               </Box>
             )}
+            <NoticeLine notice={state.notice} onExpire={handleNoticeExpire} />
             {/* Keyed by chat: remounting saves the old chat's draft and restores the new one's */}
             <InputBar
               key={state.selectedChatId ?? "none"}
@@ -653,7 +791,7 @@ export function App({ useMock = false, incognito = false }: AppProps) {
   useEffect(() => {
     if (isSetupComplete && config) {
       if (useMock) {
-        setTelegramService(createMockTelegramService());
+        setTelegramService(createMockTelegramService({ failures: mockFailuresFromEnv() }));
       } else {
         // Try to load existing session
         const session = loadSession();
