@@ -155,11 +155,27 @@ function mapMessage(
   if (!messages) return state;
   return {
     ...state,
+    // The chat list previews the last message, so keep it in step
+    chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? update(last) : last)),
     messages: {
       ...state.messages,
       [chatId]: messages.map((msg) => (msg.id === messageId ? update(msg) : msg)),
     },
   };
+}
+
+// Returns the same array when nothing changed, so memoized rows don't re-render
+function withLastMessage(
+  chats: Chat[],
+  chatId: string,
+  update: (last: Message) => Message | undefined,
+): Chat[] {
+  const index = chats.findIndex((chat) => chat.id === chatId);
+  const chat = chats[index];
+  if (!chat?.lastMessage) return chats;
+  const lastMessage = update(chat.lastMessage);
+  if (lastMessage === chat.lastMessage) return chats;
+  return chats.with(index, { ...chat, lastMessage });
 }
 
 // A reload replaces the list with server data; keep sends and edits that
@@ -201,9 +217,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
-    case "SET_MESSAGES":
+    case "SET_MESSAGES": {
+      // Messages missed while away show up on load: refresh the chat list preview.
+      // A pending local send (negative id) stays the preview until confirmed.
+      const newest = action.payload.messages.at(-1);
       return {
         ...state,
+        chats: newest
+          ? withLastMessage(state.chats, action.payload.chatId, (last) =>
+              last.id > 0 && newest.id > last.id ? newest : last,
+            )
+          : state.chats,
         senderColors: withSenderColors(state.senderColors, action.payload.chatId, action.payload.messages),
         messages: {
           ...state.messages,
@@ -213,6 +237,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           ),
         },
       };
+    }
 
     case "ADD_MESSAGE": {
       const { chatId, message } = action.payload;
@@ -505,9 +530,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           delivery: undefined,
         }));
       }
+      const remaining = messages.filter((m) => m.id !== messageId);
       return {
         ...state,
-        messages: { ...state.messages, [chatId]: messages.filter((m) => m.id !== messageId) },
+        chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? remaining.at(-1) : last)),
+        messages: { ...state.messages, [chatId]: remaining },
       };
     }
 

@@ -147,11 +147,12 @@ describe("MainApp drafts", () => {
     await wait(250);
 
     await press(stdin, ENTER, "draftone", ...BACK_TO_CHATS, DOWN, ENTER);
-    expect(lastFrame()).not.toContain("draftone");
-    expect(lastFrame()).toContain("✎");
+    expect(lastFrame()).not.toContain("> draftone");
+    expect(lastFrame()).toContain("✎ Draft: draftone");
 
     await press(stdin, ...BACK_TO_CHATS, UP, ENTER);
-    expect(lastFrame()).toContain("draftone");
+    expect(lastFrame()).toContain("> draftone");
+    expect(lastFrame()).not.toContain("Draft: draftone");
   });
 
   it("restores a reply in progress, and Esc does not cancel it", async () => {
@@ -210,7 +211,8 @@ describe("MainApp failure feedback", () => {
     failures.send = false;
     await press(stdin, ESC, ENTER);
     const frame = lastFrame() ?? "";
-    expect(frame.match(/You: hello/g)).toHaveLength(1);
+    // One in the messages ("[HH:MM] You: hello"), not counting the chat list preview
+    expect(frame.match(/\]\sYou: hello/g)).toHaveLength(1);
     expect(frame).not.toContain("hello …");
     expect(frame).not.toContain("not sent");
   });
@@ -297,6 +299,21 @@ describe("MainApp failure feedback", () => {
 
     await press(stdin, ENTER);
     expect(lastFrame()).toContain("Couldn't load Elon Musk");
+    expect(lastFrame()).toContain("Couldn't load messages");
+
+    // Ctrl+R works from the input, where opening the chat left focus
+    failures.getMessages = false;
+    await press(stdin, "\x12");
+    expect(lastFrame()).not.toContain("Couldn't load");
+    expect(lastFrame()).toContain("Mars got boring");
+  });
+
+  it("shows why the chat list is empty when startup fails", async () => {
+    failures.connect = true;
+    const { lastFrame } = renderApp();
+    await wait(250);
+    expect(lastFrame()).toContain("Couldn't load chats");
+    expect(lastFrame()).toContain("Press Ctrl+R to retry");
   });
 });
 
@@ -476,6 +493,55 @@ describe("MainApp help overlay", () => {
 
     await press(stdin, "s");
     expect(lastFrame()).toContain("Switch tab");
+  });
+});
+
+describe("MainApp navigation keys", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const renderApp = () =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+
+  it("g and G jump to the oldest and newest message, j and k step", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, "\r", "\x1b", "g");
+    expect(lastFrame()).toContain("Press Enter to load older messages");
+
+    await press(stdin, "j");
+    expect(lastFrame()).not.toContain("Press Enter to load older messages");
+
+    await press(stdin, "k");
+    expect(lastFrame()).toContain("Press Enter to load older messages");
+
+    await press(stdin, "G");
+    expect(lastFrame()).not.toContain("Press Enter to load older messages");
+  });
+
+  it("Shift+Tab cycles focus backwards", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    expect(lastFrame()).toMatch(/\] Chats/);
+
+    await press(stdin, "\x1b[Z");
+    expect(lastFrame()).toMatch(/\] Header/);
+
+    await press(stdin, "\x1b[Z");
+    expect(lastFrame()).toMatch(/\] Typing/);
   });
 });
 

@@ -17,7 +17,7 @@ describe("ChatStrip", () => {
   it("shows a 3-chat window centered on the selection", () => {
     const frame =
       render(
-        <ChatStrip chats={makeChats(6)} selectedIndex={3} selectedChatId="3" isFocused />
+        <ChatStrip status="ready" chats={makeChats(6)} selectedIndex={3} selectedChatId="3" isFocused />
       ).lastFrame() ?? "";
     expect(frame).toContain("Chat2");
     expect(frame).toContain("Chat3");
@@ -29,7 +29,7 @@ describe("ChatStrip", () => {
   it("marks the active chat with ▸ and shows overflow affordances", () => {
     const frame =
       render(
-        <ChatStrip chats={makeChats(6)} selectedIndex={3} selectedChatId="3" isFocused />
+        <ChatStrip status="ready" chats={makeChats(6)} selectedIndex={3} selectedChatId="3" isFocused />
       ).lastFrame() ?? "";
     expect(frame).toContain("▸Chat3");
     expect(frame).toContain("‹");
@@ -40,7 +40,7 @@ describe("ChatStrip", () => {
     const frame =
       render(
         <SkinContext.Provider value="claudeCode">
-          <ChatStrip chats={makeChats(6)} selectedIndex={3} selectedChatId="3" isFocused />
+          <ChatStrip status="ready" chats={makeChats(6)} selectedIndex={3} selectedChatId="3" isFocused />
         </SkinContext.Provider>
       ).lastFrame() ?? "";
     expect(frame).toContain("Chat3");
@@ -51,9 +51,16 @@ describe("ChatStrip", () => {
   it("renders a placeholder when there are no chats", () => {
     const frame =
       render(
-        <ChatStrip chats={[]} selectedIndex={0} selectedChatId={null} isFocused />
+        <ChatStrip status="ready" chats={[]} selectedIndex={0} selectedChatId={null} isFocused />
       ).lastFrame() ?? "";
     expect(frame).toContain("No chats");
+  });
+
+  it("says when chats are loading or failed to load", () => {
+    const loading = render(<ChatStrip status="loading" chats={[]} selectedIndex={0} selectedChatId={null} isFocused />);
+    expect(loading.lastFrame()).toContain("Loading chats…");
+    const failed = render(<ChatStrip status="error" chats={[]} selectedIndex={0} selectedChatId={null} isFocused />);
+    expect(failed.lastFrame()).toContain("Couldn't load chats · ^R retry");
   });
 
   it("shows a … marker for a chat that is typing", () => {
@@ -64,6 +71,7 @@ describe("ChatStrip", () => {
     const frame =
       render(
         <ChatStrip
+          status="ready"
           chats={chats}
           selectedIndex={0}
           selectedChatId={"1"}
@@ -83,6 +91,7 @@ describe("ChatStrip", () => {
     const frame =
       render(
         <ChatStrip
+          status="ready"
           chats={chats}
           selectedIndex={0}
           selectedChatId={"1"}

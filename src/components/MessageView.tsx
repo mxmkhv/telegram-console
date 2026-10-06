@@ -1,7 +1,9 @@
 import { memo, useMemo, useState, useCallback, useEffect, type Dispatch } from "react";
 import { useInput } from "ink";
+import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import { Box, Text, useSkin } from "./ui";
-import type { Message, MessageLayout } from "../types";
+import type { LoadStatus, Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
 import type { AppAction, ReactionOverlay } from "../state/reducer.js";
 import { Logo, LOGO_COLS, LOGO_ROWS } from "./Logo";
@@ -11,6 +13,7 @@ import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
 import { getSenderColor, type SenderColors } from "../utils/senderColor.js";
+import { formatDayLabel, formatTime, isSameDay } from "../utils/formatDate.js";
 
 interface MessageViewProps {
   isFocused: boolean;
@@ -18,6 +21,7 @@ interface MessageViewProps {
   messages: Message[];
   selectedIndex: number;
   isLoadingOlder?: boolean;
+  loadStatus?: LoadStatus;
   canLoadOlder?: boolean;
   width: number;
   height?: number;
@@ -39,48 +43,10 @@ interface MessageViewProps {
   isTyping?: boolean;
 }
 
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
+// Rows a line takes once Ink wraps it: Ink wraps with this same wrap-ansi call
 export function countWrappedLines(line: string, width: number): number {
-  if (width <= 0 || line.length <= width) return 1;
-  const words = line.split(" ");
-  let rows = 1;
-  let col = 0; // characters used on the current row
-  for (const word of words) {
-    if (word.length === 0) {
-      // Empty token = a space char (leading space or a run of spaces); it occupies one column.
-      if (col + 1 <= width) {
-        col += 1;
-      } else {
-        rows++;
-        col = 1;
-      }
-      continue;
-    }
-    if (word.length > width) {
-      // Long word hard-wraps onto its own rows.
-      if (col > 0) rows++;
-      const wordRows = Math.ceil(word.length / width);
-      rows += wordRows - 1;
-      const rem = word.length % width;
-      col = rem === 0 ? width : rem;
-      continue;
-    }
-    const needed = col === 0 ? word.length : col + 1 + word.length;
-    if (needed <= width) {
-      col = needed;
-    } else {
-      rows++;
-      col = word.length;
-    }
-  }
-  return rows;
+  if (width <= 0) return 1;
+  return wrapAnsi(line, width, { trim: false, hard: true }).split("\n").length;
 }
 
 function formatReactions(reactions: Message["reactions"]): string {
@@ -114,41 +80,68 @@ function hasUserReaction(reactions: Message["reactions"]): boolean {
   return reactions?.some((r) => r.hasUserReacted) ?? false;
 }
 
-function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: number): number {
-  const lines = msg.text.split("\n");
-  if (availableWidth <= 0) return lines.length;
-  // The first rendered line carries the "[HH:MM] Sender: " prefix (+ optional reply
-  // prefix, media info) and any reactions suffix; continuation \n-lines are indented
-  // 8 spaces. Include them so the count matches Ink's actual wrapping and the visible
-  // window doesn't over-pack and clip the bottom message.
-  const senderName = msg.isOutgoing ? "You" : msg.senderName;
-  const replyPrefix = msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}: ` : "";
-  const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : "";
-  const firstPrefix = `[${formatTime(msg.timestamp)}] ${replyPrefix}${senderName}:${mediaInfo} `;
-  const reactions =
-    formatReactions(msg.reactions) + formatDelivery(msg) + formatRetryHint(msg, isSelected);
-  let total = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const content = i === 0 ? firstPrefix + lines[i] + reactions : "        " + lines[i];
-    total += countWrappedLines(content, availableWidth);
-  }
-  return total;
+const CONTINUATION_INDENT = "        ";
+
+// Ink measures a tab as 0 columns but the terminal expands it, which would
+// spill past the border, so render tabs as spaces
+function splitLines(text: string): string[] {
+  return text.replace(/\t/g, "    ").split("\n");
 }
 
-function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean, availableWidth: number): number {
-  const hasName = isGroupChat && !msg.isOutgoing;
-  if (!msg.text) return (hasName ? 1 : 0) + 1;
-  const lines = msg.text.split("\n");
-  let textLines = 0;
-  if (availableWidth <= 0) {
-    textLines = lines.length;
-  } else {
-    for (const line of lines) {
-      textLines += countWrappedLines(line, availableWidth);
-    }
-  }
-  // name line (if group + not outgoing) + text lines (timestamp is inline on last line)
-  return (hasName ? 1 : 0) + Math.max(1, textLines);
+// A classic first line's pieces, in render order. They're styled separately,
+// but Ink wraps them as one string, so counting joins them the same way.
+function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
+  const senderName = msg.isOutgoing ? "You" : msg.senderName;
+  return {
+    time: `[${formatTime(msg.timestamp)}]\u00A0`,
+    reply: msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}:\u00A0` : "",
+    name: `${senderName.replace(/ /g, "\u00A0")}:`,
+    media: msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : "",
+    text: ` ${text}`,
+    viewHint: isSelected && msg.media ? " [Press enter to view]" : "",
+    reactions: formatReactions(msg.reactions),
+    delivery: formatDelivery(msg),
+    retryHint: formatRetryHint(msg, isSelected),
+  };
+}
+
+function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: number): number {
+  const [first = "", ...rest] = splitLines(msg.text);
+  const firstLine = Object.values(getClassicFirstLine(msg, first, isSelected)).join("");
+  return rest.reduce(
+    (rows, line) => rows + countWrappedLines(CONTINUATION_INDENT + line, availableWidth),
+    countWrappedLines(firstLine, availableWidth),
+  );
+}
+
+// Bubble text lines (media info on the first) and the last line's suffix pieces
+function getBubbleContent(msg: Message, isSelected: boolean) {
+  const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
+  const viewHint = isSelected && msg.media ? " [Enter]" : "";
+  const lines = splitLines(msg.text).map((line, i) =>
+    // A blank line still takes its counted row
+    i === 0 && mediaInfo ? `${line} ${mediaInfo}${viewHint}`.trim() : line || " ",
+  );
+  const suffix = {
+    timestamp: ` [${formatTime(msg.timestamp)}]`,
+    delivery: formatDelivery(msg),
+    retryHint: formatRetryHint(msg, isSelected),
+    reactions: formatReactions(msg.reactions),
+  };
+  const fullLines = lines.map((line, i) => (i === lines.length - 1 ? line + Object.values(suffix).join("") : line));
+  return { lines, suffix, fullLines };
+}
+
+function getBubbleMessageLineCount(
+  msg: Message,
+  isSelected: boolean,
+  isGroupChat: boolean,
+  availableWidth: number,
+): number {
+  const nameRows = isGroupChat && !msg.isOutgoing ? 1 : 0;
+  const replyRows = msg.replyToMsgId ? 1 : 0;
+  const { fullLines } = getBubbleContent(msg, isSelected);
+  return fullLines.reduce((rows, line) => rows + countWrappedLines(line, availableWidth), nameRows + replyRows);
 }
 
 function MessageViewInner({
@@ -157,6 +150,7 @@ function MessageViewInner({
   messages: chatMessages,
   selectedIndex,
   isLoadingOlder = false,
+  loadStatus = "ready",
   canLoadOlder = false,
   width,
   height = 24,
@@ -226,9 +220,23 @@ function MessageViewInner({
     }
   }, [isAtBottom, chatId, dispatch]);
 
-  // Message keys: 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
+  // Message keys: moving the selection, 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
   useInput(
     (input, key) => {
+      // Ctrl/Alt chords arrive as their letter (Ctrl+R as "r"): they belong to App
+      if (key.ctrl || key.meta) return;
+      const moveTo = (index: number) => {
+        if (chatMessages.length > 0) setSelectedIndex?.(Math.max(0, Math.min(chatMessages.length - 1, index)));
+      };
+      // A page keeps one message of overlap for context
+      const pageSize = Math.max(1, endIndex - startIndex - 1);
+      if (key.upArrow || input === "k") return moveTo(selectedIndex - 1);
+      if (key.downArrow || input === "j") return moveTo(selectedIndex + 1);
+      if (key.pageUp) return moveTo(selectedIndex - pageSize);
+      if (key.pageDown) return moveTo(selectedIndex + pageSize);
+      if (key.home || input === "g") return moveTo(0);
+      if (key.end || input === "G") return moveTo(chatMessages.length - 1);
+
       // Shift+R for reply (uppercase R)
       if (input === "R") {
         const selectedMessage = chatMessages[selectedIndex];
@@ -396,22 +404,32 @@ function MessageViewInner({
   // Calculate line count for each message
   // panelDividers skins have no left/right border columns, only paddingX.
   const contentWidth = width - (skin.panelDividers ? 2 : 4);
+  // A day label above the first message of each day
+  const daySeparators = useMemo(() => {
+    const now = new Date();
+    return chatMessages.map((msg, index) => {
+      const previous = chatMessages[index - 1];
+      return previous && isSameDay(previous.timestamp, msg.timestamp) ? null : formatDayLabel(msg.timestamp, now);
+    });
+  }, [chatMessages]);
+
   const messageLineCounts = useMemo(() => {
     return chatMessages.map((msg, index) => {
       const isSelected = index === selectedIndex && isFocused;
+      const separatorRows = daySeparators[index] ? 1 : 0;
       if (messageLayout === "bubble") {
-        return getBubbleMessageLineCount(msg, isGroupChat, contentWidth);
+        return separatorRows + getBubbleMessageLineCount(msg, isSelected, isGroupChat, contentWidth);
       }
-      return getMessageLineCount(msg, isSelected, contentWidth);
+      return separatorRows + getMessageLineCount(msg, isSelected, contentWidth);
     });
-  }, [chatMessages, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
+  }, [chatMessages, daySeparators, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
 
   const totalLines = useMemo(() => {
     return messageLineCounts.reduce((sum, count) => sum + count, 0);
   }, [messageLineCounts]);
 
   // Calculate visible window based on LINES, not message count
-  const { startIndex, endIndex, showScrollUp, showScrollDown } = useMemo(() => {
+  const { startIndex, endIndex, showScrollUp, showScrollDown, allFit, overflows } = useMemo(() => {
     const total = chatMessages.length;
     if (total === 0) {
       return {
@@ -419,21 +437,29 @@ function MessageViewInner({
         endIndex: 0,
         showScrollUp: false,
         showScrollDown: false,
+        allFit: true,
+        overflows: false,
       };
     }
 
+    // "Load older" or "Loading older" takes the top row whenever it shows,
+    // in place of the "↑ N earlier" line
+    const olderLine = isLoadingOlder || canLoadOlder ? 1 : 0;
+
     // Check if all messages fit
-    if (totalLines <= visibleLines) {
+    if (totalLines + olderLine <= visibleLines) {
       return {
         startIndex: 0,
         endIndex: total,
         showScrollUp: false,
         showScrollDown: false,
+        allFit: true,
+        overflows: false,
       };
     }
 
     // Reserve 1 line for scroll indicators when needed
-    const reserveTop = 1;
+    const reserveTop = olderLine ? 0 : 1;
     const reserveBottom = 1;
 
     // Start with the selected message and expand to fill available lines
@@ -443,7 +469,7 @@ function MessageViewInner({
     let linesUsed = messageLineCounts[selectedIndex]!;
 
     // Calculate available lines (reserve space for potential indicators)
-    const availableLines = visibleLines;
+    const availableLines = visibleLines - olderLine;
 
     // Check if we're at the last message (no bottom indicator needed)
     const atLastMessage = selectedIndex === total - 1;
@@ -485,13 +511,17 @@ function MessageViewInner({
       }
     }
 
+    const indicatorLines = olderLine + (start > 0 ? reserveTop : 0) + (end < total ? reserveBottom : 0);
     return {
       startIndex: start,
       endIndex: end,
       showScrollUp: start > 0,
       showScrollDown: end < total,
+      allFit: false,
+      // Only when the selected message alone is taller than the panel
+      overflows: linesUsed + indicatorLines > visibleLines,
     };
-  }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines]);
+  }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines, isLoadingOlder, canLoadOlder]);
 
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
@@ -499,88 +529,106 @@ function MessageViewInner({
   const colorForSender = (senderId: string) =>
     senderColors?.[senderId] ?? getSenderColor(senderId);
 
-  // Render a single message in bubble layout
-  const renderBubbleMessage = (
-    msg: Message,
-    isSelected: boolean,
-    _actualIndex: number,
-  ) => {
-    const showName = isGroupChat && !msg.isOutgoing;
-    const textLines = msg.text ? msg.text.split("\n") : [""];
-    const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
-    const viewHint = isSelected && msg.media ? " [Enter]" : "";
-    const timestamp = `[${formatTime(msg.timestamp)}]`;
-    const delivery = formatDelivery(msg);
-    const retryHint = formatRetryHint(msg, isSelected);
-    const deliveryColor = msg.delivery?.status === "failed" ? "red" : undefined;
-    const senderColor = colorForSender(msg.senderId);
-    const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
-    const flashColor = isFlashing ? flashState?.color : undefined;
+  // Reaction feedback has its own color; new and jumped-to messages use the default
+  const getFlashColor = (messageId: number) => {
+    if (flashState?.messageId === messageId) return flashState.color;
+    return isMsgFlashing(messageId) ? FLASH_CONFIG.messageColor : undefined;
+  };
 
-    // Calculate padding for right-aligned messages
+  // Render a single message in classic layout
+  const renderClassicMessage = (msg: Message, isSelected: boolean) => {
+    const flashColor = getFlashColor(msg.id);
+    const [first = "", ...rest] = splitLines(msg.text);
+    const firstLine = getClassicFirstLine(msg, first, isSelected);
+    return (
+      <Box flexDirection="column">
+        <Text wrap="wrap" backgroundColor={flashColor}>
+          <Text inverse={isSelected} dimColor={!isSelected}>
+            {firstLine.time}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.reply}
+          </Text>
+          <Text
+            inverse={isSelected}
+            bold
+            // No color when selected: inverse carries it
+            color={isSelected ? undefined : msg.isOutgoing ? "blue" : colorForSender(msg.senderId)}
+          >
+            {firstLine.name}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.media}
+          </Text>
+          <Text inverse={isSelected}>{firstLine.text}</Text>
+          <Text inverse={isSelected} color="yellow">
+            {firstLine.viewHint}
+          </Text>
+          <Text inverse={isSelected}>{firstLine.reactions}</Text>
+          <Text
+            inverse={isSelected}
+            color={msg.delivery?.status === "failed" ? "red" : undefined}
+            dimColor={msg.delivery?.status === "pending"}
+          >
+            {firstLine.delivery}
+          </Text>
+          <Text inverse={isSelected} color="yellow">
+            {firstLine.retryHint}
+          </Text>
+        </Text>
+        {rest.map((line, lineIndex) => (
+          <Text key={lineIndex} wrap="wrap" backgroundColor={flashColor} inverse={isSelected} dimColor={!isSelected}>
+            {CONTINUATION_INDENT}
+            {line}
+          </Text>
+        ))}
+      </Box>
+    );
+  };
+
+  // Render a single message in bubble layout
+  const renderBubbleMessage = (msg: Message, isSelected: boolean) => {
+    const showName = isGroupChat && !msg.isOutgoing;
+    const { lines, suffix, fullLines } = getBubbleContent(msg, isSelected);
+    const deliveryColor = msg.delivery?.status === "failed" ? "red" : undefined;
+    const flashColor = getFlashColor(msg.id);
 
     return (
-      <Box key={msg.id} flexDirection="column">
+      <Box flexDirection="column">
         {/* Sender name (groups only, others only) - with unique color */}
         {showName && (
-          <Text color={senderColor}>{msg.senderName || "Unknown"}</Text>
+          <Text color={colorForSender(msg.senderId)} wrap="truncate">
+            {msg.senderName || "Unknown"}
+          </Text>
         )}
 
-        {/* Reply prefix */}
         {msg.replyToMsgId && (
-          <Text dimColor>↩ {msg.replyToSenderName ?? "Unknown"}</Text>
+          <Text dimColor wrap="truncate">
+            ↩ {msg.replyToSenderName ?? "Unknown"}
+          </Text>
         )}
 
         {/* Message content with inline timestamp on last line */}
-        {textLines.map((line, lineIndex) => {
-          const isLastLine = lineIndex === textLines.length - 1;
-          const isFirstLine = lineIndex === 0;
-
-          // Build content for this line
-          let lineContent = line;
-          if (isFirstLine && mediaInfo) {
-            lineContent =
-              `${line} ${mediaInfo}${viewHint}`.trim() ||
-              `${mediaInfo}${viewHint}`;
-          }
-
-          // Add timestamp to end of last line
-          const suffix = isLastLine ? ` ${timestamp}${delivery}${retryHint}` : "";
-          const fullContent = lineContent + suffix;
-
-          if (msg.isOutgoing) {
-            // Right-aligned, blue (user's messages)
-            const padding = Math.max(0, contentWidth - fullContent.length);
-            return (
-              <Text
-                key={lineIndex}
-                inverse={isSelected}
-                backgroundColor={flashColor}
-              >
-                {" ".repeat(padding)}
-                <Text color={isSelected ? undefined : "blue"}>{lineContent}</Text>
-                {isLastLine && <Text dimColor> {timestamp}</Text>}
-                {isLastLine && <Text color={deliveryColor} dimColor={!deliveryColor}>{delivery}</Text>}
-                {isLastLine && <Text color="yellow">{retryHint}</Text>}
-                {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
-              </Text>
-            );
-          } else {
-            // Left-aligned, normal text (not dim for better readability)
-            return (
-              <Text
-                key={lineIndex}
-                inverse={isSelected}
-                backgroundColor={flashColor}
-              >
-                <Text>{lineContent}</Text>
-                {isLastLine && <Text dimColor> {timestamp}</Text>}
-                {isLastLine && <Text color={deliveryColor} dimColor={!deliveryColor}>{delivery}</Text>}
-                {isLastLine && <Text color="yellow">{retryHint}</Text>}
-                {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
-              </Text>
-            );
-          }
+        {lines.map((line, lineIndex) => {
+          const isLastLine = lineIndex === lines.length - 1;
+          // Right-align the user's own messages
+          const padding = msg.isOutgoing ? Math.max(0, contentWidth - stringWidth(fullLines[lineIndex]!)) : 0;
+          return (
+            <Text key={lineIndex} inverse={isSelected} backgroundColor={flashColor}>
+              {" ".repeat(padding)}
+              <Text color={msg.isOutgoing && !isSelected ? "blue" : undefined}>{line}</Text>
+              {isLastLine && (
+                <>
+                  <Text dimColor>{suffix.timestamp}</Text>
+                  <Text color={deliveryColor} dimColor={!deliveryColor}>
+                    {suffix.delivery}
+                  </Text>
+                  <Text color="yellow">{suffix.retryHint}</Text>
+                  <Text>{suffix.reactions}</Text>
+                </>
+              )}
+            </Text>
+          );
         })}
       </Box>
     );
@@ -623,145 +671,119 @@ function MessageViewInner({
         borderRight={false}
         borderTop={false}
       >
-        <Text bold color={isFocused ? "cyan" : undefined}>
+        <Text bold color={isFocused ? "cyan" : undefined} wrap="truncate">
           {selectedChatTitle}
         </Text>
-        {isTyping && <Text dimColor italic> typing…</Text>}
-        {totalLines > visibleLines && (
-          <Text dimColor>
-            {" "}
-            ({selectedIndex + 1}/{chatMessages.length})
-          </Text>
+        {isTyping && (
+          <Box flexShrink={0}>
+            <Text dimColor italic>
+              {" "}typing…
+            </Text>
+          </Box>
+        )}
+        {!allFit && (
+          <Box flexShrink={0}>
+            <Text dimColor>
+              {" "}
+              ({selectedIndex + 1}/{chatMessages.length})
+            </Text>
+          </Box>
         )}
       </Box>
+      {chatMessages.length === 0 ? (
+        <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
+          {/* The hint line drops first when there's only one row */}
+          {loadStatus === "loading" && (
+            <Text dimColor wrap="truncate">
+              Loading messages…
+            </Text>
+          )}
+          {loadStatus === "error" && (
+            <>
+              <Text color="red" wrap="truncate">
+                Couldn't load messages
+              </Text>
+              {visibleLines > 1 && (
+                <Text dimColor wrap="truncate">
+                  Press Ctrl+R to retry
+                </Text>
+              )}
+            </>
+          )}
+          {loadStatus === "ready" && (
+            <>
+              <Text dimColor wrap="truncate">
+                No messages yet
+              </Text>
+              {visibleLines > 1 && (
+                <Text dimColor wrap="truncate">
+                  Say hi below
+                </Text>
+              )}
+            </>
+          )}
+        </Box>
+      ) : (
       <Box
         flexDirection="column"
+        // Conversations sit on the input, like every chat app. A message taller
+        // than the panel anchors to the top so its start stays readable.
+        justifyContent={overflows ? "flex-start" : "flex-end"}
         paddingX={1}
         height={visibleLines}
         overflowY="hidden"
       >
-        {isLoadingOlder && <Text dimColor> Loading older messages...</Text>}
+        {isLoadingOlder && (
+          <Text dimColor wrap="truncate">
+            {" "}Loading older messages...
+          </Text>
+        )}
         {canLoadOlder && !isLoadingOlder && (
-          <Text color="yellow"> ↑ Press Enter to load older messages</Text>
+          <Text color="yellow" wrap="truncate">
+            {" "}↑ Press Enter to load older messages
+          </Text>
         )}
         {showScrollUp && !isLoadingOlder && !canLoadOlder && (
-          <Text dimColor> ↑ {startIndex} earlier</Text>
+          <Text dimColor wrap="truncate">
+            {" "}↑ {startIndex} earlier
+          </Text>
         )}
-        {messageLayout === "bubble"
-          ? // Bubble layout rendering
-            visibleMessages.map((msg, i) => {
-              const actualIndex = startIndex + i;
-              const isSelected = actualIndex === selectedIndex && isFocused;
-              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
-                return (
-                  <ReactionPicker
-                    key={msg.id}
-                    emojis={QUICK_EMOJIS}
-                    selectedIndex={reactionPickerIndex}
-                    onSelect={handleSendReaction}
-                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
-                    onCancel={() => setReactionOverlay(null)}
-                  />
-                );
-              }
-              return renderBubbleMessage(msg, isSelected, actualIndex);
-            })
-          : // Classic layout rendering (existing code)
-            visibleMessages.map((msg, i) => {
-              const actualIndex = startIndex + i;
-              const isSelected = actualIndex === selectedIndex && isFocused;
-              const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
-              const flashColor = isFlashing ? flashState?.color : undefined;
-
-              if (reactionPickerOpen && msg.id === reactionOverlay?.messageId) {
-                return (
-                  <ReactionPicker
-                    key={msg.id}
-                    emojis={QUICK_EMOJIS}
-                    selectedIndex={reactionPickerIndex}
-                    onSelect={handleSendReaction}
-                    onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
-                    onCancel={() => setReactionOverlay(null)}
-                  />
-                );
-              }
-
-              const senderName = msg.isOutgoing ? "You" : msg.senderName;
-              const nbspSenderName = senderName.replace(/ /g, "\u00A0");
-              const lines = msg.text.split("\n");
-              const mediaInfo = msg.media
-                ? ` ${formatMediaMetadata(msg.media, msg.id)}`
-                : "";
-              const viewHint =
-                isSelected && msg.media ? " [Press enter to view]" : "";
-              return (
-                <Box key={msg.id} flexDirection="column" flexShrink={0}>
-                  {lines.map((line, lineIndex) => (
-                    <Box key={lineIndex}>
-                      <Text wrap="wrap" backgroundColor={flashColor}>
-                        {lineIndex === 0 ? (
-                          <>
-                            <Text inverse={isSelected} dimColor={!isSelected}>
-                              [{formatTime(msg.timestamp)}]{"\u00A0"}
-                            </Text>
-                            {/* Reply prefix */}
-                            {msg.replyToMsgId && (
-                              <Text inverse={isSelected} dimColor>
-                                ↩{msg.replyToSenderName ?? "Unknown"}:{"\u00A0"}
-                              </Text>
-                            )}
-                            <Text
-                              inverse={isSelected}
-                              bold
-                              color={
-                                isSelected
-                                  ? undefined // No color when selected (use inverse colors)
-                                  : msg.isOutgoing
-                                    ? "blue"
-                                    : colorForSender(msg.senderId)
-                              }
-                            >
-                              {nbspSenderName}:
-                            </Text>
-                            <Text inverse={isSelected} dimColor>
-                              {mediaInfo}
-                            </Text>
-                            <Text inverse={isSelected}> {line}</Text>
-                            <Text inverse={isSelected} color="yellow">
-                              {viewHint}
-                            </Text>
-                            <Text inverse={isSelected}>
-                              {formatReactions(msg.reactions)}
-                            </Text>
-                            <Text
-                              inverse={isSelected}
-                              color={msg.delivery?.status === "failed" ? "red" : undefined}
-                              dimColor={msg.delivery?.status === "pending"}
-                            >
-                              {formatDelivery(msg)}
-                            </Text>
-                            <Text inverse={isSelected} color="yellow">
-                              {formatRetryHint(msg, isSelected)}
-                            </Text>
-                          </>
-                        ) : (
-                          <Text inverse={isSelected} dimColor={!isSelected}>
-                            {"        "}
-                            {line}
-                          </Text>
-                        )}
-                      </Text>
-                    </Box>
-                  ))}
+        {visibleMessages.map((msg, i) => {
+          const actualIndex = startIndex + i;
+          const isSelected = actualIndex === selectedIndex && isFocused;
+          const daySeparator = daySeparators[actualIndex];
+          return (
+            <Box key={msg.id} flexDirection="column" flexShrink={0}>
+              {daySeparator && (
+                <Box justifyContent="center">
+                  <Text dimColor wrap="truncate">
+                    ── {daySeparator} ──
+                  </Text>
                 </Box>
-              );
-            })}
+              )}
+              {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
+                <ReactionPicker
+                  emojis={QUICK_EMOJIS}
+                  selectedIndex={reactionPickerIndex}
+                  onSelect={handleSendReaction}
+                  onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+                  onCancel={() => setReactionOverlay(null)}
+                />
+              ) : messageLayout === "bubble" ? (
+                renderBubbleMessage(msg, isSelected)
+              ) : (
+                renderClassicMessage(msg, isSelected)
+              )}
+            </Box>
+          );
+        })}
         {showScrollDown && (
-          <Text dimColor inverse={isIndicatorFlashing("scroll-indicator")}>
+          <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
             {" "}↓ {chatMessages.length - endIndex} more
           </Text>
         )}
       </Box>
+      )}
       {reactionModalOpen && (
         <Box position="absolute" marginTop={5} marginLeft={10}>
           <ReactionModal
