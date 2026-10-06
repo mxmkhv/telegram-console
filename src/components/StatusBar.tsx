@@ -40,7 +40,7 @@ function StatusBarInner({ connectionState, focusedPanel }: StatusBarProps) {
       case "messages":
         return "[R: React] [Shift+R: Reply] [Enter: Message] [←: Chats] [Esc: Back]";
       case "input":
-        return "[Enter: Send] [↑: Edit] [Esc: Cancel]";
+        return "[Enter: Send] [↑: Edit] [Esc: Back]";
       default:
         return "";
     }

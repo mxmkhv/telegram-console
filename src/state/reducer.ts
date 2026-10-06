@@ -1,4 +1,4 @@
-import type { Chat, Message, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
+import type { Chat, ChatDraft, Message, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
 import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
@@ -29,6 +29,7 @@ export interface AppState {
   editingMessage: Message | null;
   isHidden: boolean;
   typingChats: Record<string, boolean>;
+  drafts: Record<string, ChatDraft>;
 }
 
 export type AppAction =
@@ -65,7 +66,8 @@ export type AppAction =
   | { type: "SET_REPLYING_TO"; payload: Message | null }
   | { type: "SET_EDITING_MESSAGE"; payload: Message | null }
   | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string } }
-  | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } };
+  | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } }
+  | { type: "SAVE_DRAFT"; payload: { chatId: string; draft: ChatDraft } };
 
 export const initialState: AppState = {
   connectionState: "disconnected",
@@ -93,6 +95,7 @@ export const initialState: AppState = {
   editingMessage: null,
   isHidden: false,
   typingChats: {},
+  drafts: {},
 };
 
 function withSenderColors(
@@ -115,14 +118,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_CHATS":
       return { ...state, chats: action.payload };
 
-    case "SELECT_CHAT":
+    case "SELECT_CHAT": {
+      // Re-selecting the open chat keeps its in-progress reply/edit
+      if (action.payload === state.selectedChatId) {
+        return { ...state, focusedPanel: "messages" };
+      }
+      const draft = state.drafts[action.payload];
       return {
         ...state,
         selectedChatId: action.payload,
         focusedPanel: "messages",
-        replyingToMessage: null,
-        editingMessage: null,
+        replyingToMessage: draft?.replyTo ?? null,
+        editingMessage: draft?.editing ?? null,
       };
+    }
 
     case "SET_MESSAGES":
       return {
@@ -369,7 +378,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case "SET_REPLYING_TO":
-      return { ...state, replyingToMessage: action.payload };
+      // Starting a reply ends any edit in progress
+      return {
+        ...state,
+        replyingToMessage: action.payload,
+        editingMessage: action.payload ? null : state.editingMessage,
+      };
 
     case "SET_EDITING_MESSAGE":
       return { ...state, editingMessage: action.payload };
@@ -398,6 +412,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const next = { ...state.typingChats };
       delete next[chatId];
       return { ...state, typingChats: next };
+    }
+
+    case "SAVE_DRAFT": {
+      const { chatId, draft } = action.payload;
+      if (draft.text.trim() || draft.replyTo || draft.editing) {
+        return { ...state, drafts: { ...state.drafts, [chatId]: draft } };
+      }
+      // Nothing worth keeping: discard any previous draft
+      if (!state.drafts[chatId]) return state;
+      const next = { ...state.drafts };
+      delete next[chatId];
+      return { ...state, drafts: next };
     }
 
     default:

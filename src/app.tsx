@@ -25,7 +25,7 @@ import { useTerminalSize } from "./hooks/useTerminalSize";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
@@ -223,6 +223,13 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   const handleCancelEdit = useCallback(() => {
     dispatch({ type: "SET_EDITING_MESSAGE", payload: null });
   }, [dispatch]);
+
+  const handleSaveDraft = useCallback(
+    (chatId: string, draft: ChatDraft) => {
+      dispatch({ type: "SAVE_DRAFT", payload: { chatId, draft } });
+    },
+    [dispatch]
+  );
 
   // Calculate terminal dimensions and panel sizes
   const { columns: terminalWidth, rows: terminalRows } = useTerminalSize();
@@ -551,6 +558,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 selectedChatId={state.selectedChatId}
                 isFocused={isChatListFocused}
                 typingChats={state.typingChats}
+                drafts={state.drafts}
               />
             )}
             <Box flexGrow={1}>
@@ -564,6 +572,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                   height={panelHeight}
                   width={getChatListWidth(terminalWidth)}
                   typingChats={state.typingChats}
+                  drafts={state.drafts}
                 />
               )}
               <MessageView
@@ -593,7 +602,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 </Text>
               </Box>
             )}
+            {/* Keyed by chat: remounting saves the old chat's draft and restores the new one's */}
             <InputBar
+              key={state.selectedChatId ?? "none"}
+              initialText={state.selectedChatId ? state.drafts[state.selectedChatId]?.text : undefined}
+              onSaveDraft={handleSaveDraft}
               isFocused={isInputFocused}
               onSubmit={handleSendMessage}
               onEdit={handleEditMessage}

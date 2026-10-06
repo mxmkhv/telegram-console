@@ -1,6 +1,6 @@
 import { memo, useMemo, useEffect } from "react";
 import { Box, Text, useSkin } from "./ui";
-import type { Chat } from "../types";
+import type { Chat, ChatDraft } from "../types";
 import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
@@ -17,17 +17,20 @@ const ChatRow = memo(function ChatRow({
   isActive,
   isFlashing,
   isTyping,
+  hasDraft,
 }: {
   chat: Chat;
   isSelected: boolean;
   isActive: boolean;
   isFlashing: boolean;
   isTyping: boolean;
+  hasDraft: boolean;
 }) {
   const hasUnread = chat.unreadCount > 0;
   const unreadIndicator = hasUnread ? "● " : "  ";
   const groupIndicator = chat.isGroup ? "# " : "  ";
-  const title = chat.title.slice(0, 26);
+  // Shorter title leaves room for the draft marker, so truncation never hides it
+  const title = chat.title.slice(0, hasDraft ? 24 : 26);
   const suffix = hasUnread ? ` (${chat.unreadCount})` : "";
 
   return (
@@ -43,7 +46,9 @@ const ChatRow = memo(function ChatRow({
         bold={hasUnread || isActive}
         color={isActive ? "cyan" : undefined}
       >
-        {title}{suffix}
+        {title}
+        {hasDraft && <Text dimColor> ✎</Text>}
+        {suffix}
       </Text>
       {isTyping && <Text dimColor> …</Text>}
     </Text>
@@ -59,9 +64,10 @@ interface ChatListProps {
   height?: number;
   width?: number;
   typingChats?: Record<string, boolean>;
+  drafts?: Record<string, ChatDraft>;
 }
 
-function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused, height = 24, width = 35, typingChats }: ChatListProps) {
+function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused, height = 24, width = 35, typingChats, drafts }: ChatListProps) {
   const skin = useSkin();
   // A single right-edge divider (panelDividers skins) doesn't consume any rows,
   // unlike a full round border's top+bottom border rows.
@@ -152,6 +158,8 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
               isActive={chat.id === selectedChatId}
               isFlashing={isFlashing(chat.id)}
               isTyping={!!typingChats?.[chat.id]}
+              // The open chat's draft is live in the input, not pending
+              hasDraft={chat.id !== selectedChatId && !!drafts?.[chat.id]}
             />
           );
         })}

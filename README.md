@@ -65,6 +65,7 @@ telegram-console
 | Enter  | Select chat / send message       |
 | Tab    | Focus input                      |
 | Esc    | Go back                          |
+| Ctrl+X | Cancel reply / edit              |
 | Ctrl+C | Exit                             |
 
 ## Features
