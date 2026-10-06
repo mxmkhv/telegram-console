@@ -155,11 +155,23 @@ function mapMessage(
   if (!messages) return state;
   return {
     ...state,
+    // The chat list previews the last message, so keep it in step
+    chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? update(last) : last)),
     messages: {
       ...state.messages,
       [chatId]: messages.map((msg) => (msg.id === messageId ? update(msg) : msg)),
     },
   };
+}
+
+function withLastMessage(
+  chats: Chat[],
+  chatId: string,
+  update: (last: Message) => Message | undefined,
+): Chat[] {
+  return chats.map((chat) =>
+    chat.id === chatId && chat.lastMessage ? { ...chat, lastMessage: update(chat.lastMessage) } : chat,
+  );
 }
 
 // A reload replaces the list with server data; keep sends and edits that
@@ -505,9 +517,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           delivery: undefined,
         }));
       }
+      const remaining = messages.filter((m) => m.id !== messageId);
       return {
         ...state,
-        messages: { ...state.messages, [chatId]: messages.filter((m) => m.id !== messageId) },
+        chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? remaining.at(-1) : last)),
+        messages: { ...state.messages, [chatId]: remaining },
       };
     }
 

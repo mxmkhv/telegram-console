@@ -152,11 +152,12 @@ describe("ChatList", () => {
       />
     );
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("Bob …");
-    expect(frame).not.toContain("Alice …");
+    expect(frame.match(/typing…/g)).toHaveLength(1);
+    const lines = frame.split("\n");
+    expect(lines[lines.findIndex((l) => l.includes("Bob")) + 1]).toContain("typing…");
   });
 
-  it("marks inactive chats with a draft with ✎", () => {
+  it("previews the draft of inactive chats", () => {
     const chats = [
       { id: "1", title: "Alice", unreadCount: 0, isGroup: false },
       { id: "2", title: "Bob", unreadCount: 0, isGroup: false },
@@ -174,17 +175,32 @@ describe("ChatList", () => {
           drafts={{ "1": draft, "2": draft }}
         />
       ).lastFrame() ?? "";
-    expect(frame).toContain("Bob ✎");
-    expect(frame).not.toContain("Alice ✎");
+    // The open chat's draft is live in the input, so only Bob's shows
+    expect(frame.match(/✎ Draft: hi/g)).toHaveLength(1);
+    const lines = frame.split("\n");
+    expect(lines[lines.findIndex((l) => l.includes("Bob")) + 1]).toContain("✎ Draft: hi");
   });
 
   // Titles truncate by display width, so markers survive long, wide (CJK)
   // titles and the narrower list used at small terminal widths.
   for (const width of [35, 30]) {
-    it(`keeps ✎ and the unread count visible for long titles at width ${width}`, () => {
+    it(`keeps the draft and unread count visible for long titles at width ${width}`, () => {
       const chats = [
         { id: "1", title: "Alice", unreadCount: 0, isGroup: false },
-        { id: "2", title: "A Very Long Group Chat Title Here", unreadCount: 99, isGroup: true },
+        {
+          id: "2",
+          title: "A Very Long Group Chat Title Here",
+          unreadCount: 99,
+          isGroup: true,
+          lastMessage: {
+            id: 1,
+            senderId: "u1",
+            senderName: "Alice",
+            text: "hello",
+            timestamp: new Date(new Date().setHours(16, 45)),
+            isOutgoing: false,
+          },
+        },
         { id: "3", title: "技术交流群技术交流群技术交流群", unreadCount: 0, isGroup: true },
       ];
       const draft = { text: "hi", replyTo: null, editing: null };
@@ -202,10 +218,11 @@ describe("ChatList", () => {
           />
         ).lastFrame() ?? "";
       const lines = frame.split("\n");
-      const latin = lines.find((l) => l.includes("A Very Long"))!;
-      const cjk = lines.find((l) => l.includes("技术"))!;
-      expect(latin).toMatch(/… ✎ \(99\) │$/);
-      expect(cjk).toMatch(/ ✎ │$/);
+      const latin = lines.findIndex((l) => l.includes("A Very Long"));
+      const cjk = lines.findIndex((l) => l.includes("技术"));
+      expect(lines[latin]).toMatch(/… 16:45 │$/);
+      expect(lines[latin + 1]).toMatch(/✎ Draft: hi +99 │$/);
+      expect(lines[cjk + 1]).toMatch(/✎ Draft: hi +│$/);
       for (const line of lines) expect(Bun.stringWidth(line)).toBe(width);
     });
   }

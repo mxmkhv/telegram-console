@@ -234,7 +234,7 @@ export function createMockTelegramService(options?: {
     },
 
     async getChats() {
-      return [...MOCK_CHATS];
+      return MOCK_CHATS.map((chat) => ({ ...chat, lastMessage: messages[chat.id]?.at(-1) }));
     },
 
     async getMessages(chatId: string, limit = 50, offsetId?: number) {

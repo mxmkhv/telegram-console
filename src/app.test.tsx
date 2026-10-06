@@ -147,11 +147,12 @@ describe("MainApp drafts", () => {
     await wait(250);
 
     await press(stdin, ENTER, "draftone", ...BACK_TO_CHATS, DOWN, ENTER);
-    expect(lastFrame()).not.toContain("draftone");
-    expect(lastFrame()).toContain("✎");
+    expect(lastFrame()).not.toContain("> draftone");
+    expect(lastFrame()).toContain("✎ Draft: draftone");
 
     await press(stdin, ...BACK_TO_CHATS, UP, ENTER);
-    expect(lastFrame()).toContain("draftone");
+    expect(lastFrame()).toContain("> draftone");
+    expect(lastFrame()).not.toContain("Draft: draftone");
   });
 
   it("restores a reply in progress, and Esc does not cancel it", async () => {
@@ -210,7 +211,8 @@ describe("MainApp failure feedback", () => {
     failures.send = false;
     await press(stdin, ESC, ENTER);
     const frame = lastFrame() ?? "";
-    expect(frame.match(/You: hello/g)).toHaveLength(1);
+    // One in the messages ("[HH:MM] You: hello"), not counting the chat list preview
+    expect(frame.match(/\]\sYou: hello/g)).toHaveLength(1);
     expect(frame).not.toContain("hello …");
     expect(frame).not.toContain("not sent");
   });

@@ -129,6 +129,19 @@ function extractReactions(msg: Api.Message): Message["reactions"] {
     }));
 }
 
+function toMessage(m: Api.Message, sender: GramJSSender | undefined): Message {
+  return {
+    id: m.id,
+    senderId: m.senderId?.toString() ?? "",
+    senderName: formatSenderName(sender),
+    text: extractMessageText(m),
+    timestamp: new Date(m.date * 1000),
+    isOutgoing: m.out ?? false,
+    media: extractMedia(m),
+    reactions: extractReactions(m),
+  };
+}
+
 const TYPING_TIMEOUT_MS = 6000;
 
 // True for any "actively composing" action we surface as generic "typing…".
@@ -223,16 +236,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
             const msg = event.message;
             const chatId = msg.chatId?.toString() ?? "";
             const sender = (await msg.getSender()) as GramJSSender | undefined;
-            const message: Message = {
-              id: msg.id,
-              senderId: msg.senderId?.toString() ?? "",
-              senderName: formatSenderName(sender),
-              text: extractMessageText(msg),
-              timestamp: new Date(msg.date * 1000),
-              isOutgoing: msg.out ?? false,
-              media: extractMedia(msg),
-              reactions: extractReactions(msg),
-            };
+            const message = toMessage(msg, sender);
             _messageCallbacks.forEach(cb => cb(message, chatId));
           },
           new NewMessage({})
@@ -292,6 +296,8 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           title: d.title ?? "Unknown",
           unreadCount: d.unreadCount ?? 0,
           isGroup: d.isGroup ?? false,
+          // getDialogs attaches each message's sender, so this needs no extra request
+          lastMessage: d.message ? toMessage(d.message, d.message.sender as GramJSSender | undefined) : undefined,
         }));
     },
 
@@ -306,14 +312,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
 
       // Reverse to get chronological order (oldest first)
       return rawMessages.map((m) => ({
-        id: m.id,
-        senderId: m.senderId?.toString() ?? "",
-        senderName: formatSenderName(m.sender as GramJSSender | undefined),
-        text: extractMessageText(m),
-        timestamp: new Date(m.date * 1000),
-        isOutgoing: m.out ?? false,
-        media: extractMedia(m),
-        reactions: extractReactions(m),
+        ...toMessage(m, m.sender as GramJSSender | undefined),
         replyToMsgId: m.replyTo?.replyToMsgId,
         replyToSenderName: m.replyTo?.replyToMsgId
           ? msgIdToSender.get(m.replyTo.replyToMsgId) ?? "Unknown"
