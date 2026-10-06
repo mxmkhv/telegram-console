@@ -34,7 +34,7 @@ import { useTerminalSize } from "./hooks/useTerminalSize";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, LoadStatus, Message } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, FocusedPanel, LoadStatus, Message } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
@@ -473,16 +473,13 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      // Tab cycles panels
+      // Tab cycles panels, Shift+Tab cycles back
       if (key.tab) {
-        if (state.focusedPanel === "header") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
-        } else if (state.focusedPanel === "chatList") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
-        } else if (state.focusedPanel === "messages") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
-        } else if (state.focusedPanel === "input") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: isMinimal ? "chatList" : "header" });
+        const order: FocusedPanel[] = isMinimal ? ["chatList", "messages", "input"] : ["header", "chatList", "messages", "input"];
+        const current = order.indexOf(state.focusedPanel);
+        if (current >= 0) {
+          const next = order[(current + (key.shift ? -1 : 1) + order.length) % order.length]!;
+          dispatch({ type: "SET_FOCUSED_PANEL", payload: next });
         }
         return;
       }
@@ -549,11 +546,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
       // Panel-specific navigation
       if (state.focusedPanel === "chatList") {
-        if (key.upArrow || (narrow && key.leftArrow)) {
+        if (key.upArrow || input === "k" || (narrow && key.leftArrow)) {
           const newIndex = Math.max(0, chatIndex - 1);
           const newChat = state.chats[newIndex];
           if (newChat) setHighlightedChatId(newChat.id);
-        } else if (key.downArrow || (narrow && key.rightArrow)) {
+        } else if (key.downArrow || input === "j" || (narrow && key.rightArrow)) {
           const newIndex = Math.min(state.chats.length - 1, chatIndex + 1);
           const newChat = state.chats[newIndex];
           if (newChat) setHighlightedChatId(newChat.id);
@@ -564,14 +561,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
         }
       } else if (state.focusedPanel === "messages") {
-        if (key.upArrow) {
-          setMessageIndex((i) => Math.max(0, i - 1));
-        } else if (key.downArrow) {
-          setMessageIndex((i) => Math.min(currentMessages.length - 1, i + 1));
-        } else if (key.leftArrow) {
+        if (key.leftArrow) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         }
-        // Enter belongs to MessageView
+        // Moving the selection and Enter belong to MessageView, which knows the page size
       }
     },
     { isActive: state.focusedPanel !== "input" && !state.isHidden }

@@ -496,3 +496,52 @@ describe("MainApp help overlay", () => {
   });
 });
 
+describe("MainApp navigation keys", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const renderApp = () =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+
+  it("g and G jump to the oldest and newest message, j and k step", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, "\r", "\x1b", "g");
+    expect(lastFrame()).toContain("Press Enter to load older messages");
+
+    await press(stdin, "j");
+    expect(lastFrame()).not.toContain("Press Enter to load older messages");
+
+    await press(stdin, "k");
+    expect(lastFrame()).toContain("Press Enter to load older messages");
+
+    await press(stdin, "G");
+    expect(lastFrame()).not.toContain("Press Enter to load older messages");
+  });
+
+  it("Shift+Tab cycles focus backwards", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    expect(lastFrame()).toMatch(/\] Chats/);
+
+    await press(stdin, "\x1b[Z");
+    expect(lastFrame()).toMatch(/\] Header/);
+
+    await press(stdin, "\x1b[Z");
+    expect(lastFrame()).toMatch(/\] Typing/);
+  });
+});
+

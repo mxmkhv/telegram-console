@@ -502,3 +502,83 @@ describe("MessageView load states", () => {
   });
 });
 
+describe("MessageView paging", () => {
+  it("PgUp and PgDn move by a screen of messages", async () => {
+    const messages: Message[] = Array.from({ length: 30 }, (_, i) => ({
+      id: i + 1,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${i + 1}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }));
+    const moves: number[] = [];
+    const { stdin } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={29}
+        setSelectedIndex={(index) => moves.push(index)}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    stdin.write("\x1b[5~");
+    await new Promise((r) => setTimeout(r, 30));
+    stdin.write("\x1b[6~");
+    await new Promise((r) => setTimeout(r, 30));
+    // 8 rows: the "↑ earlier" line + 7 messages, so a page is 6 (one message overlaps)
+    expect(moves).toEqual([23, 29]);
+  });
+});
+
+describe("MessageView load-older row", () => {
+  it("budgets its own row instead of colliding with the day label", () => {
+    const messages: Message[] = Array.from({ length: 7 }, (_, i) => ({
+      id: i + 1,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${i + 1}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }));
+    // 8 rows: exactly the day label + 7 messages, with no room for the load-older line
+    const frame =
+      renderWithProvider(
+        <MessageView
+          isFocused
+          selectedChatTitle="Alice"
+          messages={messages}
+          selectedIndex={0}
+          canLoadOlder
+          width={50}
+          height={12}
+          dispatch={mockDispatch}
+          messageLayout="classic"
+          isGroupChat={false}
+          chatId="1"
+          sendReaction={mockSendReaction}
+          removeReaction={mockRemoveReaction}
+          onRetryDelivery={mockRetryDelivery}
+          onLoadOlder={mockLoadOlder}
+          reactionOverlay={null}
+        />,
+      ).lastFrame() ?? "";
+    const lines = frame.split("\n");
+    const older = lines.findIndex((l) => l.includes("Press Enter to load older messages"));
+    expect(older).toBeGreaterThan(0);
+    expect(lines[older + 1]).toContain("── Jan 15, 2024 ──");
+    expect(lines[older + 2]).toContain("message 1");
+  });
+});
+

@@ -213,9 +213,21 @@ function MessageViewInner({
     }
   }, [isAtBottom, chatId, dispatch]);
 
-  // Message keys: 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
+  // Message keys: moving the selection, 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
   useInput(
     (input, key) => {
+      const moveTo = (index: number) => {
+        if (chatMessages.length > 0) setSelectedIndex?.(Math.max(0, Math.min(chatMessages.length - 1, index)));
+      };
+      // A page keeps one message of overlap for context
+      const pageSize = Math.max(1, endIndex - startIndex - 1);
+      if (key.upArrow || input === "k") return moveTo(selectedIndex - 1);
+      if (key.downArrow || input === "j") return moveTo(selectedIndex + 1);
+      if (key.pageUp) return moveTo(selectedIndex - pageSize);
+      if (key.pageDown) return moveTo(selectedIndex + pageSize);
+      if (key.home || input === "g") return moveTo(0);
+      if (key.end || input === "G") return moveTo(chatMessages.length - 1);
+
       // Shift+R for reply (uppercase R)
       if (input === "R") {
         const selectedMessage = chatMessages[selectedIndex];
@@ -419,8 +431,12 @@ function MessageViewInner({
       };
     }
 
+    // "Load older" or "Loading older" takes the top row whenever it shows,
+    // in place of the "↑ N earlier" line
+    const olderLine = isLoadingOlder || canLoadOlder ? 1 : 0;
+
     // Check if all messages fit
-    if (totalLines <= visibleLines) {
+    if (totalLines + olderLine <= visibleLines) {
       return {
         startIndex: 0,
         endIndex: total,
@@ -430,7 +446,7 @@ function MessageViewInner({
     }
 
     // Reserve 1 line for scroll indicators when needed
-    const reserveTop = 1;
+    const reserveTop = olderLine ? 0 : 1;
     const reserveBottom = 1;
 
     // Start with the selected message and expand to fill available lines
@@ -440,7 +456,7 @@ function MessageViewInner({
     let linesUsed = messageLineCounts[selectedIndex]!;
 
     // Calculate available lines (reserve space for potential indicators)
-    const availableLines = visibleLines;
+    const availableLines = visibleLines - olderLine;
 
     // Check if we're at the last message (no bottom indicator needed)
     const atLastMessage = selectedIndex === total - 1;
@@ -488,7 +504,7 @@ function MessageViewInner({
       showScrollUp: start > 0,
       showScrollDown: end < total,
     };
-  }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines]);
+  }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines, isLoadingOlder, canLoadOlder]);
 
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
@@ -670,12 +686,20 @@ function MessageViewInner({
         height={visibleLines}
         overflowY="hidden"
       >
-        {isLoadingOlder && <Text dimColor> Loading older messages...</Text>}
+        {isLoadingOlder && (
+          <Text dimColor wrap="truncate">
+            {" "}Loading older messages...
+          </Text>
+        )}
         {canLoadOlder && !isLoadingOlder && (
-          <Text color="yellow"> ↑ Press Enter to load older messages</Text>
+          <Text color="yellow" wrap="truncate">
+            {" "}↑ Press Enter to load older messages
+          </Text>
         )}
         {showScrollUp && !isLoadingOlder && !canLoadOlder && (
-          <Text dimColor> ↑ {startIndex} earlier</Text>
+          <Text dimColor wrap="truncate">
+            {" "}↑ {startIndex} earlier
+          </Text>
         )}
         {visibleMessages.map((msg, i) => {
           const actualIndex = startIndex + i;
@@ -707,7 +731,7 @@ function MessageViewInner({
           );
         })}
         {showScrollDown && (
-          <Text dimColor inverse={isIndicatorFlashing("scroll-indicator")}>
+          <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
             {" "}↓ {chatMessages.length - endIndex} more
           </Text>
         )}

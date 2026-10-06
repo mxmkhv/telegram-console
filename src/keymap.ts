@@ -20,6 +20,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
       { keys: ["?"], action: "Show this help", hint: "help" },
       { keys: ["^K", "/"], action: "Go to chat (^K works while typing)", hint: "go to chat" },
       { keys: ["Tab"], action: "Next panel", hint: "next panel" },
+      { keys: ["Shift+Tab"], action: "Previous panel" },
       { keys: ["s"], action: "Settings", hint: "settings" },
       { keys: ["l"], action: "Log out", hint: "logout" },
       { keys: ["m"], action: "Toggle minimal layout", hint: "minimal" },
@@ -40,7 +41,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
   chatList: {
     title: "Chats",
     bindings: [
-      { keys: ["↑↓"], action: "Move (←→ on narrow screens)", hint: "move" },
+      { keys: ["↑↓", "j/k"], action: "Move (←→ on narrow screens)", hint: "move" },
       { keys: ["Enter"], action: "Open the chat and start typing", hint: "open" },
       { keys: ["→"], action: "Go to messages (wide screens)" },
       { keys: ["Esc"], action: "Go to the header (full layout)" },
@@ -49,7 +50,10 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
   messages: {
     title: "Messages",
     bindings: [
-      { keys: ["↑↓"], action: "Select a message" },
+      { keys: ["↑↓", "j/k"], action: "Select a message" },
+      { keys: ["PgUp", "PgDn"], action: "Page up / down" },
+      { keys: ["g", "Home"], action: "Oldest loaded message" },
+      { keys: ["G", "End"], action: "Newest message" },
       { keys: ["r"], action: "React, or remove your reaction", hint: "react" },
       { keys: ["R"], action: "Reply", hint: "reply" },
       { keys: ["Enter"], action: "Open media, jump to reply, or type" },
