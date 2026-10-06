@@ -257,7 +257,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const updatedChat = {
           ...chat,
           lastMessage: message,
-          unreadCount: state.selectedChatId === chatId ? chat.unreadCount : chat.unreadCount + 1,
+          // Your own messages, sent from another device, aren't unread
+          unreadCount: state.selectedChatId === chatId || message.isOutgoing ? chat.unreadCount : chat.unreadCount + 1,
         };
         // Move chat to top of list
         updatedChats = [

@@ -32,6 +32,11 @@ describe("escape sequences", () => {
     expect(desktopNotification("osc777", "a;b", "c;d")).toBe("\x1b]777;notify;a,b;c,d\x07");
   });
 
+  it("never cuts an emoji in half when shortening", () => {
+    const sequence = setTitle(`${"x".repeat(78)}😀😀😀`);
+    expect(sequence).toBe(`\x1b]2;${"x".repeat(78)}😀…\x07`);
+  });
+
   it("shortens a long title", () => {
     expect(setTitle("x".repeat(100))).toBe(`\x1b]2;${"x".repeat(79)}…\x07`);
   });

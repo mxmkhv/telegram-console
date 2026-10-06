@@ -190,7 +190,8 @@ export function createMockTelegramService(options?: {
       isOutgoing: false,
     };
     (messages[chatId] ??= []).push(message);
-    messageCallbacks.forEach((cb) => cb(message, chatId));
+    // Like Telegram: what's sent while offline is only there when you ask for it
+    if (!offline) messageCallbacks.forEach((cb) => cb(message, chatId));
   }
 
   return {
@@ -223,6 +224,7 @@ export function createMockTelegramService(options?: {
       connectionCallback?.(connectionState);
 
       if (failures.drop) {
+        if (dropTimer) clearTimeout(dropTimer);
         dropTimer = setTimeout(() => {
           this.simulateConnectionDrop();
           // GramJS has given up by then: the watchdog's retries bring it back

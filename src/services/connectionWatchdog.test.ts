@@ -1,13 +1,14 @@
 import { describe, it, expect } from "bun:test";
-import { createConnectionWatchdog } from "./connectionWatchdog";
+import { createConnectionWatchdog, readConnectionReport } from "./connectionWatchdog";
 import type { ConnectionState } from "../types";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function setup(results: Array<boolean | Error>) {
+function setup(results: Array<boolean | Error>, isRecovering?: () => boolean) {
   const states: ConnectionState[] = [];
   let tries = 0;
   const watchdog = createConnectionWatchdog({
+    isRecovering,
     reconnect: async () => {
       const result = results[Math.min(tries++, results.length - 1)]!;
       if (result instanceof Error) throw result;
@@ -60,5 +61,38 @@ describe("createConnectionWatchdog", () => {
     const { watchdog, states } = setup([true]);
     watchdog.restored();
     expect(states).toEqual([]);
+  });
+
+  it("waits while the library is still reconnecting instead of calling it disconnected", async () => {
+    let recovering = true;
+    const { watchdog, states, tries } = setup([true], () => recovering);
+    watchdog.lost();
+    await wait(70);
+    expect(states).toEqual(["connecting"]);
+    expect(tries()).toBe(0);
+    recovering = false;
+    await wait(40);
+    expect(states).toEqual(["connecting", "connected"]);
+  });
+});
+
+describe("readConnectionReport", () => {
+  const live = { wasConnected: true, reconnecting: false, connected: true };
+
+  it("ignores the disconnected report GramJS sends for a slow pong", () => {
+    expect(readConnectionReport(false, live)).toBe("ignore");
+  });
+
+  it("takes a report while reconnecting, or after letting go, as a drop", () => {
+    expect(readConnectionReport(false, { ...live, reconnecting: true })).toBe("lost");
+    expect(readConnectionReport(false, { ...live, connected: false })).toBe("lost");
+  });
+
+  it("leaves a failed first connect to connect()", () => {
+    expect(readConnectionReport(false, { wasConnected: false, reconnecting: false, connected: false })).toBe("ignore");
+  });
+
+  it("takes connected as restored", () => {
+    expect(readConnectionReport(true, live)).toBe("restored");
   });
 });

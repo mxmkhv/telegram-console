@@ -77,6 +77,17 @@ describe("appReducer", () => {
     expect(chat2?.unreadCount).toBe(0);
   });
 
+  it("ADD_MESSAGE doesn't count your own message from another device as unread", () => {
+    const state = appReducer(
+      appReducer(initialState, { type: "SET_CHATS", payload: [{ id: "1", title: "Chat One", unreadCount: 2, isGroup: false }] }),
+      {
+        type: "ADD_MESSAGE",
+        payload: { chatId: "1", message: { id: 5, senderId: "me", senderName: "You", text: "from my phone", timestamp: new Date(), isOutgoing: true } },
+      },
+    );
+    expect(state.chats[0]?.unreadCount).toBe(2);
+  });
+
   it("ADD_MESSAGE does NOT increment unreadCount for selected chat", () => {
     const stateWithChats = appReducer(initialState, {
       type: "SET_CHATS",

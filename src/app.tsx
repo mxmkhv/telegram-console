@@ -26,7 +26,6 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NoticeLine } from "./components/NoticeLine";
 import { describeError } from "./utils/describeError";
 import { withTimeout } from "./utils/withTimeout";
-import { countUnread } from "./utils/unread";
 
 const DELIVERY_TIMEOUT_MS = 30_000;
 // A stalled load turns into the error state, which Ctrl+R can retry
@@ -48,17 +47,17 @@ interface MainAppProps {
   writeToTerminal?: (data: string) => void;
 }
 
-// Escapes go straight to the terminal: they print nothing, so Ink's frame is unaffected
-const terminalWriter = process.stdout.isTTY ? (data: string) => void process.stdout.write(data) : undefined;
-
 export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTerminal }: MainAppProps) {
   const { state, dispatch } = useApp();
 
-  useTerminalNotifications({
+  // The open chat is on screen unless something covers its messages
+  const messagesCovered =
+    state.currentView !== "chat" || state.mediaPanel.isOpen || state.showChatSwitcher || state.showHelp || state.showLogoutPrompt;
+  const { newWhileHidden } = useTerminalNotifications({
     write: writeToTerminal,
     telegramService,
     chats: state.chats,
-    viewingChatId: state.currentView === "chat" ? state.selectedChatId : null,
+    viewingChatId: messagesCovered ? null : state.selectedChatId,
     hidden: state.isHidden,
     mode: state.notifications,
   });
@@ -269,11 +268,29 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
     }
     if (!connectionDropped.current) return;
     connectionDropped.current = false;
-    telegramService.getChats().then(
-      (chats) => dispatch({ type: "SET_CHATS", payload: chats }),
-      (err: unknown) => showError(`Reconnected, but couldn't refresh your chats; new messages still arrive (${describeError(err)})`),
-    );
-    if (stateRef.current.selectedChatId) setLoadAttempt((n) => n + 1);
+    const failed = (what: string) => (err: unknown) =>
+      showError(`Reconnected, but couldn't refresh ${what}: reopen the chat to see what you missed (${describeError(err)})`);
+    telegramService.getChats().then((chats) => {
+      // The open chat was read here, whatever the server counted meanwhile
+      const openChatId = stateRef.current.selectedChatId;
+      dispatch({ type: "SET_CHATS", payload: chats.map((c) => (c.id === openChatId ? { ...c, unreadCount: 0 } : c)) });
+    }, failed("your chats"));
+
+    // Add what arrived to the open chat, keeping older pages already scrolled through
+    const chatId = stateRef.current.selectedChatId;
+    if (!chatId) return;
+    telegramService.getMessages(chatId).then((latest) => {
+      const known = stateRef.current.messages[chatId];
+      const newestKnown = known?.findLast((m) => m.id > 0)?.id;
+      // Nothing to keep, or more was missed than one page: start from the latest
+      if (newestKnown === undefined || (latest[0] && latest[0].id > newestKnown)) {
+        dispatch({ type: "SET_MESSAGES", payload: { chatId, messages: latest } });
+        return;
+      }
+      for (const message of latest) {
+        if (message.id > newestKnown) dispatch({ type: "ADD_MESSAGE", payload: { chatId, message } });
+      }
+    }, failed("this chat"));
   }, [state.connectionState, chatsLoaded, telegramService, dispatch, showError]);
 
   // Focus media panel when it opens
@@ -764,7 +781,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
   }, [state.mediaPanel.isOpen, state.mediaPanel.messageId, currentMessages]);
 
   if (state.isHidden) {
-    return <BlankScreen unread={countUnread(state.chats)} height={terminalRows} />;
+    return <BlankScreen newMessages={newWhileHidden} height={terminalRows} />;
   }
 
   // Media popup: full-screen takeover. Replaces the entire UI with the photo
@@ -915,9 +932,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
 interface AppProps {
   useMock?: boolean;
   incognito?: boolean;
+  /** Writes the bell, window title and notification escapes; tests leave it out */
+  writeToTerminal?: (data: string) => void;
 }
 
-export function App({ useMock = false, incognito = false }: AppProps) {
+export function App({ useMock = false, incognito = false, writeToTerminal }: AppProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [telegramService, setTelegramService] = useState<TelegramService | null>(null);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
@@ -1021,7 +1040,7 @@ export function App({ useMock = false, incognito = false }: AppProps) {
             telegramService={telegramService}
             onLogout={handleLogout}
             onToggleNoColor={handleToggleNoColor}
-            writeToTerminal={terminalWriter}
+            writeToTerminal={writeToTerminal}
           />
         </AppProvider>
       </ErrorBoundary>

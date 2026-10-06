@@ -52,6 +52,13 @@ export function saveConfig(config: AppConfig, customDir?: string): void {
   writeFileSync(path, JSON.stringify(config, null, 2));
 }
 
+const NOTIFICATION_MODES: NotificationMode[] = ["all", "bell", "off"];
+
+// An unknown TG_NOTIFY value (e.g. "false") falls back to the saved setting
+function parseNotificationMode(value: string | undefined): NotificationMode | undefined {
+  return NOTIFICATION_MODES.find((mode) => mode === value);
+}
+
 export function loadConfigWithEnvOverrides(
   customDir?: string,
 ): AppConfig | null {
@@ -77,7 +84,7 @@ export function loadConfigWithEnvOverrides(
     messageLayout:
       (process.env.TG_MESSAGE_LAYOUT as MessageLayout) ?? config.messageLayout,
     skin: (process.env.TG_SKIN as SkinName) ?? config.skin,
-    notifications: (process.env.TG_NOTIFY as NotificationMode) ?? config.notifications,
+    notifications: parseNotificationMode(process.env.TG_NOTIFY) ?? config.notifications,
     noColor:
       process.env.NO_COLOR != null && process.env.NO_COLOR !== ""
         ? true

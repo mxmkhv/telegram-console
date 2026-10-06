@@ -9,14 +9,17 @@ const ST = `${ESC}\\`;
 function clean(text: string, max: number): string {
   // eslint-disable-next-line no-control-regex
   const flat = text.replace(/[\x00-\x1f\x7f-\x9f]+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+  // By character, so an emoji is never cut in half
+  const chars = Array.from(flat);
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : flat;
 }
 
 export const bell = (): string => BEL;
 
 /** Saves the current window title, so popTitle can restore it on exit */
 export const pushTitle = (): string => `${ESC}[22;0t`;
-export const popTitle = (): string => `${ESC}[23;0t`;
+// Blank first: a terminal without the title stack shows its own title, not a stale count
+export const popTitle = (): string => `${ESC}]2;${BEL}${ESC}[23;0t`;
 export const setTitle = (title: string): string => `${ESC}]2;${clean(title, 80)}${BEL}`;
 
 export type DesktopNotifyProtocol = "osc9" | "osc99" | "osc777";

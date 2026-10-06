@@ -2,7 +2,7 @@ import { TelegramClient, Api, utils } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent, Raw } from "telegram/events";
 import { UpdateConnectionState } from "telegram/network";
-import { createConnectionWatchdog } from "./connectionWatchdog";
+import { createConnectionWatchdog, readConnectionReport } from "./connectionWatchdog";
 import type { TelegramService, ConnectionState, Message, MediaAttachment } from "../types";
 
 // Type for sender objects from GramJS (User, Chat, or Channel)
@@ -221,10 +221,17 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
   let disconnecting = false;
   const watchdog = createConnectionWatchdog({
     async reconnect() {
-      // GramJS is still retrying on its own
-      if (client._sender?.isReconnecting) return false;
-      return (await client.connect()) || !!client.connected;
+      if (disconnecting) return false;
+      const connected = (await client.connect()) || !!client.connected;
+      // Logged out while that was in flight: don't leave a live connection behind
+      if (disconnecting) {
+        await client.disconnect();
+        return false;
+      }
+      return connected;
     },
+    // GramJS is still retrying on its own
+    isRecovering: () => !!client._sender?.isReconnecting,
     onStateChange: setConnectionState,
   });
 
@@ -236,21 +243,19 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
       setConnectionState("connecting");
       // GramJS resolves false (instead of throwing) once its retries run out,
       // and also when already connected
-      let connected: boolean;
       try {
-        connected = (await client.connect()) || !!client.connected;
+        const connected = (await client.connect()) || !!client.connected;
+        if (!connected) {
+          throw new Error("Couldn't reach Telegram servers. Check your network connection");
+        }
+        // GramJS looks up the account before dispatching each update until it
+        // has it. Fetch it now, or a drop reported before any other update
+        // would wait for the network it just lost.
+        await client.getMe(true);
       } catch (err) {
         setConnectionState("disconnected");
         throw err;
       }
-      if (!connected) {
-        setConnectionState("disconnected");
-        throw new Error("Couldn't reach Telegram servers. Check your network connection");
-      }
-      // GramJS looks up the account before dispatching each update until it
-      // has it. Fetch it now, or a drop reported before any other update
-      // would wait for the network it just lost.
-      await client.getMe(true);
       setConnectionState("connected");
       onSessionUpdate?.(String(client.session.save()));
 
@@ -302,9 +307,13 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         client.addEventHandler(
           (update: UpdateConnectionState) => {
             if (disconnecting) return;
-            if (update.state === UpdateConnectionState.connected) watchdog.restored();
-            // Only a drop once connected: a failed first connect is connect()'s to report
-            else if (connectionState === "connected") watchdog.lost();
+            const report = readConnectionReport(update.state === UpdateConnectionState.connected, {
+              wasConnected: connectionState === "connected",
+              reconnecting: !!client._sender?.isReconnecting,
+              connected: !!client.connected,
+            });
+            if (report === "restored") watchdog.restored();
+            else if (report === "lost") watchdog.lost();
           },
           new Raw({ types: [UpdateConnectionState] }),
         );
