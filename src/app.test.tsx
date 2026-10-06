@@ -375,3 +375,55 @@ describe("MainApp overlays own the keyboard", () => {
     expect(lastFrame()).toContain("CHATLIST");
   });
 });
+
+describe("MainApp chat switcher", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const renderApp = () =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const ENTER = "\r";
+  const ESC = "\x1b";
+  const CTRL_K = "\x0b";
+
+  it("/ opens the switcher and Enter jumps to the match", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, "/", "t", "r", "u", "m", "p");
+    expect(lastFrame()).toContain("Go to chat");
+
+    await press(stdin, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Go to chat");
+    expect(frame).toContain("Not yet. But I'm considering it");
+    expect(frame).toContain("INPUT");
+  });
+
+  it("Ctrl+K works from the input without typing into it, and Esc keeps the draft", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "draft", CTRL_K, "x", "y");
+    expect(lastFrame()).toContain("Go to chat");
+
+    await press(stdin, ESC);
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Go to chat");
+    expect(frame).toContain("> draft");
+    expect(frame).not.toContain("draftxy");
+    expect(frame).toContain("INPUT");
+  });
+});

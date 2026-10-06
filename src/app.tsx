@@ -18,6 +18,7 @@ import { Setup } from "./components/Setup";
 import { HeaderBar } from "./components/HeaderBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
+import { ChatSwitcher } from "./components/ChatSwitcher";
 import { MediaPanel } from "./components/MediaPanel";
 import { BlankScreen } from "./components/BlankScreen";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -225,6 +226,23 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [dispatch]
   );
 
+  const openChatSwitcher = useCallback(() => {
+    dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: true });
+  }, [dispatch]);
+
+  const closeChatSwitcher = useCallback(() => {
+    dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: false });
+  }, [dispatch]);
+
+  const handleSwitchToChat = useCallback(
+    (chatId: string) => {
+      dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: false });
+      setHighlightedChatId(chatId);
+      handleSelectChat(chatId);
+    },
+    [dispatch, handleSelectChat]
+  );
+
   // Sends the local message and swaps in Telegram's copy once it's accepted
   const deliverSend = useCallback(
     async (chatId: string, local: Message) => {
@@ -407,8 +425,13 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      // Overlays (settings, logout, reactions, media) handle their own keys
+      // Overlays (settings, logout, reactions, media, switcher) handle their own keys
       if (overlayOpen) {
+        return;
+      }
+
+      if ((key.ctrl && input === "k") || input === "/") {
+        openChatSwitcher();
         return;
       }
 
@@ -518,10 +541,13 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   // Escape to exit input mode (only active when input is focused)
   useInput(
     (input, key) => {
+      if (overlayOpen) return;
       if (key.escape) {
         dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
       } else if (key.ctrl && input === "r" && initFailed) {
         retryInit();
+      } else if (key.ctrl && input === "k") {
+        openChatSwitcher();
       }
     },
     { isActive: state.focusedPanel === "input" && !state.isHidden }
@@ -688,6 +714,16 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         {state.showLogoutPrompt ? (
           <Box flexGrow={1} alignItems="center" justifyContent="center">
             <LogoutPrompt onConfirm={handleLogoutConfirm} onCancel={handleLogoutCancel} />
+          </Box>
+        ) : state.showChatSwitcher ? (
+          <Box flexGrow={1} alignItems="center" justifyContent="center">
+            <ChatSwitcher
+              chats={state.chats}
+              onSelect={handleSwitchToChat}
+              onClose={closeChatSwitcher}
+              width={Math.min(60, terminalWidth - 2)}
+              maxRows={Math.min(12, panelHeight - 6)}
+            />
           </Box>
         ) : state.currentView === "settings" ? (
           <SettingsPanel />
