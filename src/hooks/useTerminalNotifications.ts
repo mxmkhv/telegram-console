@@ -9,6 +9,7 @@ import {
   setTitle,
 } from "../services/terminalNotify";
 import { getMessagePreview } from "../utils/messagePreview";
+import { countUnread } from "../utils/unread";
 
 /** One alert per burst: a busy group shouldn't ring for every message */
 export const ALERT_COOLDOWN_MS = 2000;
@@ -40,7 +41,7 @@ export function useTerminalNotifications({
   mode,
   env = process.env,
 }: TerminalNotificationsOptions) {
-  const unread = chats.reduce((sum, chat) => sum + (chat.isMuted ? 0 : chat.unreadCount), 0);
+  const unread = countUnread(chats);
 
   // Save the title on the way in and restore it on the way out (and while hidden)
   useEffect(() => {

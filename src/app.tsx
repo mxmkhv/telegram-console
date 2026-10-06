@@ -26,6 +26,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NoticeLine } from "./components/NoticeLine";
 import { describeError } from "./utils/describeError";
 import { withTimeout } from "./utils/withTimeout";
+import { countUnread } from "./utils/unread";
 
 const DELIVERY_TIMEOUT_MS = 30_000;
 // A stalled load turns into the error state, which Ctrl+R can retry
@@ -763,7 +764,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
   }, [state.mediaPanel.isOpen, state.mediaPanel.messageId, currentMessages]);
 
   if (state.isHidden) {
-    return <BlankScreen />;
+    return <BlankScreen unread={countUnread(state.chats)} height={terminalRows} />;
   }
 
   // Media popup: full-screen takeover. Replaces the entire UI with the photo

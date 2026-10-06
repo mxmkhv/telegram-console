@@ -38,7 +38,7 @@ describe("MainApp hidden mode", () => {
     await new Promise((r) => setTimeout(r, 50));
     const hidden = lastFrame() ?? "";
     expect(hidden).not.toContain("Chats");
-    expect(hidden.trim()).toBe("");
+    expect(hidden.trim()).toBe("any key to return");
 
     stdin.write(" ");
     await new Promise((r) => setTimeout(r, 50));
