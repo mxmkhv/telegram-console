@@ -543,5 +543,36 @@ describe("MainApp navigation keys", () => {
     await press(stdin, "\x1b[Z");
     expect(lastFrame()).toMatch(/\] Typing/);
   });
+
+  it("Tab and Shift+Tab leave the input and keep the draft", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    await press(stdin, "\r", "draft");
+    expect(lastFrame()).toMatch(/\] Typing/);
+
+    await press(stdin, "\t");
+    expect(lastFrame()).toMatch(/\] Header/);
+
+    await press(stdin, "\x1b[Z", "\x1b[Z");
+    expect(lastFrame()).toMatch(/\] Messages/);
+    expect(lastFrame()).toContain("> draft");
+  });
+
+  it("a long draft grows the input to 4 rows without pushing the header off", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+    await press(stdin, "\r");
+    const height = lastFrame()!.split("\n").length;
+
+    await press(stdin, "1\n2\n3\n4\n5\n6");
+    const frame = lastFrame()!;
+    expect(frame.split("\n").length).toBe(height);
+    expect(frame).toContain("telegram-console");
+    expect(frame).toMatch(/│ {3}6/);
+    expect(frame).not.toMatch(/│ {3}2/);
+
+    await press(stdin, "\r");
+    expect(lastFrame()!.split("\n").length).toBe(height);
+  });
 });
 
