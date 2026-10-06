@@ -29,7 +29,7 @@ const ChatRow = memo(function ChatRow({
   const hasUnread = chat.unreadCount > 0;
   const unreadIndicator = hasUnread ? "● " : "  ";
   const groupIndicator = chat.isGroup ? "# " : "  ";
-  // Shorter title leaves room for the draft marker, so truncation never hides it
+  // Shorter title leaves room for the draft marker at full list width
   const title = chat.title.slice(0, hasDraft ? 24 : 26);
   const suffix = hasUnread ? ` (${chat.unreadCount})` : "";
 

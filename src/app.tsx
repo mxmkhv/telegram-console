@@ -172,10 +172,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         type: "ADD_MESSAGE",
         payload: { chatId, message },
       });
-      // Clear reply state after sending
-      if (replyToMsgId) {
-        dispatch({ type: "SET_REPLYING_TO", payload: null });
-      }
+      // No reply clear here: InputBar cancels it on Enter, and by the time the
+      // send resolves the user may have restored another chat's reply draft.
     },
     [telegramService, dispatch, state.replyingToMessage]
   );

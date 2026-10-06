@@ -377,8 +377,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    // Reply and edit are exclusive. Ending an edit also clears the input
+    // (InputBar's edit-sync effect).
     case "SET_REPLYING_TO":
-      // Starting a reply ends any edit in progress
       return {
         ...state,
         replyingToMessage: action.payload,
@@ -386,7 +387,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case "SET_EDITING_MESSAGE":
-      return { ...state, editingMessage: action.payload };
+      return {
+        ...state,
+        editingMessage: action.payload,
+        replyingToMessage: action.payload ? null : state.replyingToMessage,
+      };
 
     case "UPDATE_MESSAGE": {
       const { chatId, messageId, newText } = action.payload;

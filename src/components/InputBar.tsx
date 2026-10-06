@@ -17,6 +17,7 @@ interface InputBarProps {
   onCancelEdit?: () => void;
   // Read on mount only - the parent keys InputBar by chat to restore drafts
   initialText?: string;
+  // Called on unmount with the chat's text and reply/edit context
   onSaveDraft?: (chatId: string, draft: ChatDraft) => void;
 }
 
@@ -94,7 +95,7 @@ function InputBarInner({
     []
   );
 
-  // Entering edit mode loads the message text; leaving it drops that text.
+  // Entering edit mode loads the message text; leaving it clears the input.
   // The edit present at mount is a restored draft whose text may differ from
   // the original, so skip it.
   const prevEditingRef = useRef(editingMessage);
@@ -111,7 +112,7 @@ function InputBarInner({
   // Custom input handler - atomic state updates prevent character flipping
   useInput(
     (input, key) => {
-      // Escape leaves the input (handled by App); reply/edit stays in the draft
+      // Escape leaves the input (handled by App); reply/edit context is kept
       if (key.escape) {
         return;
       }

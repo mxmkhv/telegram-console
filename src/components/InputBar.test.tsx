@@ -267,6 +267,51 @@ describe("InputBar", () => {
       expect(saved).toEqual([["123", { text: "answer", replyTo: reply, editing: null }]]);
     });
 
+    it("saves an empty draft on unmount so a stale one is discarded", async () => {
+      const saved: Array<[string, ChatDraft]> = [];
+      const { stdin, unmount } = render(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" initialText="old" onSaveDraft={(chatId, draft) => saved.push([chatId, draft])} />
+      );
+      for (let i = 0; i < 3; i++) {
+        stdin.write("\x7f");
+        await tick();
+      }
+      unmount();
+      await tick();
+      expect(saved).toEqual([["123", { text: "", replyTo: null, editing: null }]]);
+    });
+
+    it("does not save a draft when no chat is selected", async () => {
+      let calls = 0;
+      const { unmount } = render(
+        <InputBar isFocused={true} onSubmit={mockOnSubmit} selectedChatId={null} onSaveDraft={() => calls++} />
+      );
+      unmount();
+      await tick();
+      expect(calls).toBe(0);
+    });
+
+    it("sends a restored edit draft as an edit with the revised text", async () => {
+      const edits: Array<[string, string, number]> = [];
+      let cancelled = 0;
+      const { stdin } = render(
+        <InputBar
+          isFocused={true}
+          onSubmit={mockOnSubmit}
+          onEdit={(text, chatId, messageId) => edits.push([text, chatId, messageId])}
+          onCancelEdit={() => cancelled++}
+          selectedChatId="123"
+          editingMessage={message("Original")}
+          initialText="Original, revised"
+        />
+      );
+      await tick();
+      stdin.write("\r");
+      await tick();
+      expect(edits).toEqual([["Original, revised", "123", 9]]);
+      expect(cancelled).toBe(1);
+    });
+
     it("does not overwrite a restored edit draft with the original text", async () => {
       const { lastFrame } = render(
         <InputBar

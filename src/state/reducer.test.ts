@@ -452,6 +452,13 @@ describe("drafts", () => {
     expect(replying.replyingToMessage?.id).toBe(7);
   });
 
+  it("starting an edit ends a reply in progress", () => {
+    const replying = appReducer(initialState, { type: "SET_REPLYING_TO", payload: msg(7) });
+    const editing = appReducer(replying, { type: "SET_EDITING_MESSAGE", payload: msg(9) });
+    expect(editing.replyingToMessage).toBeNull();
+    expect(editing.editingMessage?.id).toBe(9);
+  });
+
   it("RESET_STATE clears drafts", () => {
     const saved = appReducer(initialState, { type: "SAVE_DRAFT", payload: { chatId: "1", draft: draft("hi") } });
     expect(appReducer(saved, { type: "RESET_STATE" }).drafts).toEqual({});
