@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Box, Text, useSkin } from "./ui";
 
-const HINTS = "Tab cycle · ^V send image · m minimal · h hide · c colors · s settings · l logout";
+const HINTS = "^K go to chat · Tab cycle · ^V send image · m minimal · h hide · c colors · s settings · l logout";
 const RIBBON_ICON = "⏵⏵";
 
 function ShortcutsBarInner() {
