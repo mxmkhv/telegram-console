@@ -33,6 +33,7 @@ const LOAD_TIMEOUT_MS = 30_000;
 const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
 import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
+import { useTerminalNotifications } from "./hooks/useTerminalNotifications";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
@@ -42,10 +43,24 @@ interface MainAppProps {
   telegramService: TelegramService;
   onLogout: (mode: LogoutMode) => void;
   onToggleNoColor: () => void;
+  /** Writes the bell, window title and notification escapes; tests leave it out */
+  writeToTerminal?: (data: string) => void;
 }
 
-export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppProps) {
+// Escapes go straight to the terminal: they print nothing, so Ink's frame is unaffected
+const terminalWriter = process.stdout.isTTY ? (data: string) => void process.stdout.write(data) : undefined;
+
+export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTerminal }: MainAppProps) {
   const { state, dispatch } = useApp();
+
+  useTerminalNotifications({
+    write: writeToTerminal,
+    telegramService,
+    chats: state.chats,
+    viewingChatId: state.currentView === "chat" ? state.selectedChatId : null,
+    hidden: state.isHidden,
+    mode: state.notifications,
+  });
   const { exit } = useInkApp();
   // Track highlighted chat by ID (not index) so it follows when chats reorder
   const [highlightedChatId, setHighlightedChatId] = useState<string | null>(null);
@@ -995,11 +1010,17 @@ export function App({ useMock = false, incognito = false }: AppProps) {
   } else {
     tree = (
       <ErrorBoundary>
-        <AppProvider telegramService={telegramService} initialUiMode={config?.uiMode} initialSkin={config?.skin}>
+        <AppProvider
+          telegramService={telegramService}
+          initialUiMode={config?.uiMode}
+          initialSkin={config?.skin}
+          initialNotifications={config?.notifications}
+        >
           <MainApp
             telegramService={telegramService}
             onLogout={handleLogout}
             onToggleNoColor={handleToggleNoColor}
+            writeToTerminal={terminalWriter}
           />
         </AppProvider>
       </ErrorBoundary>

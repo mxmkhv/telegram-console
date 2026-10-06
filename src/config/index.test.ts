@@ -30,6 +30,7 @@ describe("Config", () => {
       uiMode: "full" as const,
       noColor: false,
       skin: "default" as const,
+      notifications: "all" as const,
     };
 
     saveConfig(config, TEST_CONFIG_DIR);
@@ -75,6 +76,7 @@ describe("Environment Overrides", () => {
       uiMode: "full" as const,
       noColor: false,
       skin: "default" as const,
+      notifications: "all" as const,
     };
     saveConfig(config, TEST_CONFIG_DIR);
 

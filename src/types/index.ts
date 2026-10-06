@@ -17,7 +17,11 @@ export interface AppConfig {
   uiMode: UiMode;
   noColor: boolean;
   skin: SkinName;
+  notifications: NotificationMode;
 }
+
+/** For new messages in chats you're not viewing; the title's unread count shows either way */
+export type NotificationMode = "all" | "bell" | "off";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected";
 export type LoadStatus = "loading" | "ready" | "error";
@@ -59,6 +63,8 @@ export interface Chat {
   unreadCount: number;
   lastMessage?: Message;
   isGroup: boolean;
+  /** Muted in Telegram: no bell or notification, and left out of the title's count */
+  isMuted?: boolean;
 }
 
 export interface Message {

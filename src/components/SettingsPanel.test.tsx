@@ -30,10 +30,11 @@ const ENTER = String.fromCharCode(13);
 const wait = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe("SettingsPanel tabs", () => {
-  it("shows both tab labels and defaults to the Message Layout tab", () => {
+  it("shows the tab labels and defaults to the Layout tab", () => {
     const frame = renderPanel("default").lastFrame() ?? "";
-    expect(frame).toContain("Message Layout");
+    expect(frame).toContain("[ Layout ]");
     expect(frame).toContain("Skin");
+    expect(frame).toContain("Notifications");
     expect(frame).toContain("Classic");
     expect(frame).toContain("Bubble");
     expect(frame).not.toContain("Claude Code");
@@ -76,5 +77,32 @@ describe("SettingsPanel tabs", () => {
       .split("\n")
       .find((line) => line.includes("Claude Code"));
     expect(claudeCodeLine).toContain("(current)");
+  });
+});
+
+describe("SettingsPanel notifications", () => {
+  it("is the third tab and saves the chosen mode", async () => {
+    const { stdin, lastFrame } = renderPanel();
+    stdin.write(RIGHT);
+    await wait();
+    stdin.write(RIGHT);
+    await wait();
+    expect(lastFrame()).toContain("[ Notifications ]");
+    const currentLine = (lastFrame() ?? "").split("\n").find((line) => line.includes("(current)"));
+    expect(currentLine).toContain("Bell and desktop notification");
+
+    stdin.write(DOWN);
+    await wait();
+    stdin.write(ENTER);
+    await wait();
+    const bellLine = (lastFrame() ?? "").split("\n").find((line) => line.includes("Bell only"));
+    expect(bellLine).toContain("(current)");
+  });
+
+  it("wraps from the first tab back to the last with the left arrow", async () => {
+    const { stdin, lastFrame } = renderPanel();
+    stdin.write(ESC + "[D");
+    await wait();
+    expect(lastFrame()).toContain("[ Notifications ]");
   });
 });

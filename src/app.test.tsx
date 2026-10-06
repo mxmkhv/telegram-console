@@ -530,6 +530,75 @@ describe("MainApp connection drops", () => {
   });
 });
 
+describe("MainApp terminal notifications", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const BELL = "\x07";
+  const renderApp = (writes: string[], initialNotifications?: "all" | "bell" | "off") =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full" initialNotifications={initialNotifications}>
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} writeToTerminal={(data) => writes.push(data)} />
+      </AppProvider>
+    );
+
+  it("counts unread messages from unmuted chats in the window title, and restores it on exit", async () => {
+    const writes: string[] = [];
+    const { unmount } = renderApp(writes);
+    await wait(250);
+    expect(writes[0]).toBe("\x1b[22;0t");
+    // 47 + 3 + 1 + 2 + 5; the muted group's 99 don't count
+    expect(writes.at(-1)).toBe("\x1b]2;(58) telegram-console\x07");
+    unmount();
+    expect(writes.at(-1)).toBe("\x1b[23;0t");
+  });
+
+  it("rings for other chats, but not the open one, a muted one, or while hidden", async () => {
+    const writes: string[] = [];
+    const { stdin } = renderApp(writes);
+    await wait(250);
+    stdin.write("\r");
+    await wait();
+
+    svc.simulateIncomingMessage("1", "in the open chat");
+    svc.simulateIncomingMessage("4", "in the muted group");
+    await wait();
+    expect(writes).not.toContain(BELL);
+
+    svc.simulateIncomingMessage("2", "elsewhere");
+    await wait();
+    expect(writes.filter((w) => w === BELL)).toHaveLength(1);
+  });
+
+  it("stays quiet while hidden, giving the window title back", async () => {
+    const writes: string[] = [];
+    const { stdin } = renderApp(writes);
+    await wait(250);
+    stdin.write("h");
+    await wait();
+    expect(writes.at(-1)).toBe("\x1b[23;0t");
+
+    svc.simulateIncomingMessage("2", "while hidden");
+    await wait();
+    expect(writes).not.toContain(BELL);
+
+    stdin.write("x");
+    await wait();
+    expect(writes.slice(-2)).toEqual(["\x1b[22;0t", "\x1b]2;(59) telegram-console\x07"]);
+  });
+
+  it("stays quiet when turned off", async () => {
+    const writes: string[] = [];
+    renderApp(writes, "off");
+    await wait(250);
+    svc.simulateIncomingMessage("2", "elsewhere");
+    await wait();
+    expect(writes).not.toContain(BELL);
+  });
+});
+
 describe("MainApp navigation keys", () => {
   let svc: ReturnType<typeof createMockTelegramService>;
   beforeEach(() => { svc = createMockTelegramService(); });

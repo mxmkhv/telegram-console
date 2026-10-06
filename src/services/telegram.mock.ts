@@ -5,7 +5,7 @@ const MOCK_CHATS: Chat[] = [
   { id: "1", title: "Elon Musk", unreadCount: 47, isGroup: false },
   { id: "2", title: "Donald Trump", unreadCount: 3, isGroup: false },
   { id: "3", title: "Satoshi Nakamoto", unreadCount: 1, isGroup: false },
-  { id: "4", title: "Tech Bros Anonymous", unreadCount: 99, isGroup: true },
+  { id: "4", title: "Tech Bros Anonymous", unreadCount: 99, isGroup: true, isMuted: true },
   { id: "5", title: "Mark Zuckerberg", unreadCount: 0, isGroup: false },
   { id: "6", title: "Bill Gates", unreadCount: 2, isGroup: false },
   { id: "7", title: "Jeff Bezos", unreadCount: 0, isGroup: false },

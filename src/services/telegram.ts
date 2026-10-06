@@ -89,6 +89,14 @@ function extractMedia(msg: Api.Message): MediaAttachment | undefined {
   return undefined;
 }
 
+// Muted until a time still ahead (forever is a far-off date). A chat that
+// follows the account's default for its type isn't marked, even if that mutes it.
+function isMuted(dialog: Api.TypeDialog | undefined): boolean {
+  if (!(dialog instanceof Api.Dialog)) return false;
+  const muteUntil = dialog.notifySettings.muteUntil;
+  return muteUntil !== undefined && muteUntil * 1000 > Date.now();
+}
+
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
@@ -328,6 +336,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           title: d.title ?? "Unknown",
           unreadCount: d.unreadCount ?? 0,
           isGroup: d.isGroup ?? false,
+          isMuted: isMuted(d.dialog),
           // getDialogs attaches each message's sender, so this needs no extra request
           // MessageEmpty has no date (or anything else worth previewing)
           lastMessage: d.message?.date ? toMessage(d.message, d.message.sender as GramJSSender | undefined) : undefined,

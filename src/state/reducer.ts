@@ -1,4 +1,4 @@
-import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
+import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode } from "../types";
 import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
@@ -25,6 +25,7 @@ export interface AppState {
   messageLayout: MessageLayout;
   uiMode: UiMode;
   skin: SkinName;
+  notifications: NotificationMode;
   replyingToMessage: Message | null;
   editingMessage: Message | null;
   isHidden: boolean;
@@ -64,6 +65,7 @@ export type AppAction =
   | { type: "SET_MEDIA_ERROR"; payload: string }
   // Inline preview actions
   | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout }
+  | { type: "SET_NOTIFICATIONS"; payload: NotificationMode }
   | { type: "SET_UI_MODE"; payload: UiMode }
   | { type: "SET_SKIN"; payload: SkinName }
   | { type: "SET_HIDDEN"; payload: boolean }
@@ -109,6 +111,7 @@ export const initialState: AppState = {
   messageLayout: "classic",
   uiMode: "full",
   skin: "default",
+  notifications: "all",
   replyingToMessage: null,
   editingMessage: null,
   isHidden: false,
@@ -404,6 +407,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     case "SET_MESSAGE_LAYOUT":
       return { ...state, messageLayout: action.payload };
+
+    case "SET_NOTIFICATIONS":
+      return { ...state, notifications: action.payload };
 
     case "SET_UI_MODE":
       return { ...state, uiMode: action.payload };

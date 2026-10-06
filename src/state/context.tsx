@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useReducer, useMemo, type Dispatch } from "react";
 import { appReducer, initialState, type AppState, type AppAction } from "./reducer";
-import type { TelegramService, UiMode, SkinName } from "../types";
+import type { TelegramService, UiMode, SkinName, NotificationMode } from "../types";
 
 // Split contexts to prevent unnecessary re-renders
 // Components needing only dispatch won't re-render when state changes
@@ -13,9 +13,16 @@ interface AppProviderProps {
   telegramService?: TelegramService | null;
   initialUiMode?: UiMode;
   initialSkin?: SkinName;
+  initialNotifications?: NotificationMode;
 }
 
-export function AppProvider({ children, telegramService = null, initialUiMode, initialSkin }: AppProviderProps) {
+export function AppProvider({
+  children,
+  telegramService = null,
+  initialUiMode,
+  initialSkin,
+  initialNotifications,
+}: AppProviderProps) {
   const [state, dispatch] = useReducer(
     appReducer,
     initialState,
@@ -23,6 +30,7 @@ export function AppProvider({ children, telegramService = null, initialUiMode, i
       ...base,
       ...(initialUiMode ? { uiMode: initialUiMode } : null),
       ...(initialSkin ? { skin: initialSkin } : null),
+      ...(initialNotifications ? { notifications: initialNotifications } : null),
     }),
   );
 
