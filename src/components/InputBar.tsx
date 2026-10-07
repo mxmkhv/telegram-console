@@ -30,6 +30,8 @@ interface InputBarProps {
   rows?: number;
   /** Text rows the text needs, up to MAX_INPUT_ROWS */
   onRowsChange?: (rows: number) => void;
+  /** Turn :) into 🙂 as you type */
+  convertEmoticons?: boolean;
 }
 
 // Combined state to avoid race conditions between value and cursor
@@ -54,6 +56,7 @@ function InputBarInner({
   width,
   rows,
   onRowsChange,
+  convertEmoticons = true,
 }: InputBarProps) {
   // Single state object prevents race conditions between value and cursor updates
   const [state, setState] = useState<InputState>(() => {
@@ -184,8 +187,8 @@ function InputBarInner({
         setState((s) => {
           if (s.value.trim() && selectedChatId) {
             // Transform any trailing emoticon before submitting
-            const { text: transformedText } = transformEmoticons(s.value, s.value.length);
-            pendingSubmit.current = transformedText.trim();
+            const text = convertEmoticons ? transformEmoticons(s.value, s.value.length).text : s.value;
+            pendingSubmit.current = text.trim();
             return { value: "", cursor: 0 };
           }
           return s;
@@ -250,7 +253,7 @@ function InputBarInner({
           const newCursor = s.cursor + text.length;
 
           // Transform emoticon when space is typed
-          if (text === " ") {
+          if (text === " " && convertEmoticons) {
             const { text, cursorAdjustment } = transformEmoticons(newValue, newCursor);
             return { value: text, cursor: newCursor + cursorAdjustment };
           }

@@ -39,6 +39,7 @@ export function loadConfig(customDir?: string): AppConfig | null {
     noColor: config.noColor ?? false,
     skin: config.skin ?? "default",
     notifications: config.notifications ?? "all",
+    convertEmoticons: config.convertEmoticons ?? true,
   } as AppConfig;
 }
 
@@ -53,10 +54,11 @@ export function saveConfig(config: AppConfig, customDir?: string): void {
 }
 
 const NOTIFICATION_MODES: NotificationMode[] = ["all", "bell", "off"];
+const MESSAGE_LAYOUTS: MessageLayout[] = ["classic", "bubble"];
 
-// An unknown TG_NOTIFY value (e.g. "false") falls back to the saved setting
-function parseNotificationMode(value: string | undefined): NotificationMode | undefined {
-  return NOTIFICATION_MODES.find((mode) => mode === value);
+// An unknown env value (e.g. TG_NOTIFY=false) falls back to the saved setting
+function parseOption<T extends string>(value: string | undefined, options: readonly T[]): T | undefined {
+  return options.find((option) => option === value);
 }
 
 export function loadConfigWithEnvOverrides(
@@ -81,10 +83,9 @@ export function loadConfigWithEnvOverrides(
     authMethod:
       (process.env.TG_AUTH_METHOD as AppConfig["authMethod"]) ??
       config.authMethod,
-    messageLayout:
-      (process.env.TG_MESSAGE_LAYOUT as MessageLayout) ?? config.messageLayout,
+    messageLayout: parseOption(process.env.TG_MESSAGE_LAYOUT, MESSAGE_LAYOUTS) ?? config.messageLayout,
     skin: (process.env.TG_SKIN as SkinName) ?? config.skin,
-    notifications: parseNotificationMode(process.env.TG_NOTIFY) ?? config.notifications,
+    notifications: parseOption(process.env.TG_NOTIFY, NOTIFICATION_MODES) ?? config.notifications,
     noColor:
       process.env.NO_COLOR != null && process.env.NO_COLOR !== ""
         ? true

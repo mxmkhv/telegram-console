@@ -8,8 +8,7 @@ interface HeaderBarProps {
 
 function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
   const skin = useSkin();
-  // TODO: finish bubble layout
-  const _settingsStyle = {
+  const settingsStyle = {
     bold: isFocused && selectedButton === "settings",
     color: isFocused && selectedButton === "settings" ? "cyan" : undefined,
     dimColor: !isFocused || selectedButton !== "settings",
@@ -40,10 +39,8 @@ function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
         telegram-console
       </Text>
       <Box>
-        {/* TODO: finish bubble layout
         <Text {...settingsStyle}>[Settings]</Text>
         <Text> </Text>
-        */}
         <Text {...logoutStyle}>[Logout]</Text>
       </Box>
     </Box>

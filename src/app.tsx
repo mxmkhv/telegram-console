@@ -953,6 +953,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
               width={terminalWidth}
               rows={inputRows}
               onRowsChange={setInputRows}
+              convertEmoticons={state.convertEmoticons}
             />
             <ShortcutsBar width={terminalWidth} isTyping={isInputFocused} />
           </>
@@ -1073,8 +1074,10 @@ export function App({ useMock = false, incognito = false, writeToTerminal }: App
         <AppProvider
           telegramService={telegramService}
           initialUiMode={config?.uiMode}
+          initialMessageLayout={config?.messageLayout}
           initialSkin={config?.skin}
           initialNotifications={config?.notifications}
+          initialConvertEmoticons={config?.convertEmoticons}
         >
           <MainApp
             telegramService={telegramService}

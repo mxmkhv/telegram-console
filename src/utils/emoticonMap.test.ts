@@ -238,6 +238,17 @@ describe("transformEmoticons", () => {
     });
   });
 
+  describe("code", () => {
+    it("leaves emoticons inside backticks alone", () => {
+      expect(transformEmoticons("`x = a :P ", 10).text).toBe("`x = a :P ");
+      expect(transformEmoticons("```\nfoo :D ", 11).text).toBe("```\nfoo :D ");
+    });
+
+    it("converts again once the code span is closed", () => {
+      expect(transformEmoticons("`a` :) ", 7).text).toBe("`a` \u{1F642} ");
+    });
+  });
+
   describe("EMOTICON_MAP export", () => {
     it("exports EMOTICON_MAP with expected keys", () => {
       expect(EMOTICON_MAP[":)"]).toBe("\u{1F642}");

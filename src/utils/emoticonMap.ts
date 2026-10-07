@@ -119,7 +119,9 @@ export function transformEmoticons(
 
   // Check if word matches an emoticon (O(1) lookup)
   const emoji = EMOTICON_MAP[word];
-  if (!emoji) {
+  // An odd number of backticks before it: it's inside `code`, keep it as typed
+  const inCode = (text.slice(0, wordStart).match(/`/g)?.length ?? 0) % 2 === 1;
+  if (!emoji || inCode) {
     return { text, cursorAdjustment: 0 };
   }
 

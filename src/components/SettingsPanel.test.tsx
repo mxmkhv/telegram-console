@@ -103,6 +103,22 @@ describe("SettingsPanel notifications", () => {
     const { stdin, lastFrame } = renderPanel();
     stdin.write(ESC + "[D");
     await wait();
-    expect(lastFrame()).toContain("[ Notifications ]");
+    expect(lastFrame()).toContain("[ Typing ]");
+  });
+});
+
+describe("SettingsPanel typing", () => {
+  it("turns emoticon conversion off", async () => {
+    const { stdin, lastFrame } = renderPanel();
+    stdin.write(ESC + "[D");
+    await wait();
+    const currentLine = () => (lastFrame() ?? "").split("\n").find((line) => line.includes("(current)"));
+    expect(currentLine()).toContain("Convert to emoji");
+
+    stdin.write(DOWN);
+    await wait();
+    stdin.write(ENTER);
+    await wait();
+    expect(currentLine()).toContain("Keep as typed");
   });
 });
