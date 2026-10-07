@@ -14,7 +14,7 @@ import { MessageView } from "./components/MessageView";
 import { isNarrowLayout, getChatListWidth, getMessageViewWidth } from "./layout";
 import { InputBar } from "./components/InputBar";
 import { StatusBar } from "./components/StatusBar";
-import { Setup } from "./components/Setup";
+import { Setup, type Credentials } from "./components/Setup";
 import { HeaderBar } from "./components/HeaderBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
@@ -33,7 +33,7 @@ const DELIVERY_TIMEOUT_MS = 30_000;
 const LOAD_TIMEOUT_MS = 30_000;
 const MESSAGE_PAGE_SIZE = 50;
 const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
-import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
+import { DEFAULT_SETTINGS, hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, updateConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
 import { useTerminalNotifications } from "./hooks/useTerminalNotifications";
 import { createTelegramService } from "./services/telegram";
@@ -572,10 +572,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
         if (next === "minimal" && state.focusedPanel === "header") {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         }
-        const cfg = loadConfig();
-        if (cfg) {
-          saveConfig({ ...cfg, uiMode: next });
-        }
+        updateConfig({ uiMode: next });
         return;
       }
 
@@ -1018,13 +1015,14 @@ export function App({ useMock = false, incognito = false, writeToTerminal }: App
     }
   }, [isSetupComplete, config, useMock, incognito]);
 
-  const handleSetupComplete = useCallback((newConfig: AppConfig, session: string) => {
-    saveConfig(newConfig);
+  const handleSetupComplete = useCallback(({ apiId, apiHash }: Credentials, session: string) => {
+    // Logging in again keeps your settings
+    saveConfig({ ...(loadConfig() ?? DEFAULT_SETTINGS), apiId, apiHash });
     // Save session string to config directory (skip in incognito mode)
     if (session && !incognito) {
       saveSession(session);
     }
-    setConfig(newConfig);
+    setConfig(loadConfigWithEnvOverrides());
     setIsSetupComplete(true);
   }, [incognito]);
 
@@ -1036,7 +1034,7 @@ export function App({ useMock = false, incognito = false, writeToTerminal }: App
       deleteSession();
       // Return to QR auth - keep config, clear setup state
       setTelegramService(null);
-      // Re-trigger setup but skip to auth step
+      // Back to Setup, which goes straight to the QR code with the saved credentials
       setIsSetupComplete(false);
     } else {
       deleteAllData();
@@ -1057,15 +1055,19 @@ export function App({ useMock = false, incognito = false, writeToTerminal }: App
   const handleToggleNoColor = useCallback(() => {
     setNoColor((prev) => {
       const next = !prev;
-      const cfg = loadConfig();
-      if (cfg) saveConfig({ ...cfg, noColor: next });
+      updateConfig({ noColor: next });
       return next;
     });
   }, []);
 
   let tree: React.ReactNode;
   if (!isSetupComplete) {
-    tree = <Setup onComplete={handleSetupComplete} preferredAuthMethod="qr" />;
+    tree = (
+      <Setup
+        onComplete={handleSetupComplete}
+        savedCredentials={config ? { apiId: String(config.apiId), apiHash: config.apiHash } : undefined}
+      />
+    );
   } else if (!telegramService) {
     tree = null;
   } else {

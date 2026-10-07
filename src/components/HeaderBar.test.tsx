@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
+import { Box } from "ink";
 import { HeaderBar } from "./HeaderBar";
 import { SkinContext } from "./ui/SkinContext";
 
@@ -41,5 +42,16 @@ describe("HeaderBar", () => {
     expect(claudeCodeLines[0]).not.toContain("─");
     expect(claudeCodeFrame).not.toContain("╭");
     expect(claudeCodeFrame).toMatch(/─+\s*$/m);
+  });
+
+  it("stays one row on a narrow screen, keeping both buttons whole", () => {
+    const frame =
+      render(
+        <Box width={30}>
+          <HeaderBar isFocused={false} selectedButton="settings" />
+        </Box>,
+      ).lastFrame() ?? "";
+    expect(frame.split("\n")).toHaveLength(3);
+    expect(frame).toContain("[Settings] [Logout]");
   });
 });

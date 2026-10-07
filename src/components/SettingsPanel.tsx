@@ -2,8 +2,8 @@ import React, { memo, useState, useCallback } from "react";
 import { useInput, Box as InkBox, Text as InkText } from "ink";
 import { Box, Text, useSkin } from "./ui";
 import { useApp } from "../state/context";
-import type { AppConfig, MessageLayout, NotificationMode } from "../types";
-import { loadConfig, saveConfig } from "../config";
+import type { MessageLayout, NotificationMode } from "../types";
+import { updateConfig } from "../config";
 import { SKIN_NAMES, getSkin } from "../config/skins";
 import { detectDesktopNotify } from "../services/terminalNotify";
 
@@ -27,6 +27,41 @@ const TABS = [
   { key: "typing", label: "Typing" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
+
+interface Option {
+  label: string;
+  detail: string;
+}
+
+/** Choices with a line of detail under each */
+function OptionList<T extends Option>({
+  options,
+  selectedIndex,
+  isCurrent,
+}: {
+  options: T[];
+  selectedIndex: number;
+  isCurrent: (option: T) => boolean;
+}) {
+  const skin = useSkin();
+  return options.map((option, i) => {
+    const isSelected = selectedIndex === i;
+    return (
+      <React.Fragment key={option.label}>
+        <Box flexDirection="row" marginTop={i === 0 ? 0 : 1}>
+          <Text color={isSelected ? "cyan" : undefined}>{isSelected ? `${skin.glyphs.caret} ` : "  "}</Text>
+          <Text bold color={isSelected ? "cyan" : undefined}>
+            {option.label}
+          </Text>
+          {isCurrent(option) && <Text dimColor> (current)</Text>}
+        </Box>
+        <Box marginLeft={4}>
+          <Text dimColor>{option.detail}</Text>
+        </Box>
+      </React.Fragment>
+    );
+  });
+}
 
 function SettingsPanelInner() {
   const { state, dispatch } = useApp();
@@ -55,26 +90,22 @@ function SettingsPanelInner() {
   ];
 
   const handleSelect = useCallback(() => {
-    const persist = (change: Partial<AppConfig>) => {
-      const config = loadConfig();
-      if (config) saveConfig({ ...config, ...change });
-    };
     if (activeTab === "layout") {
       const newLayout = LAYOUT_OPTIONS[layoutIndex]!;
       dispatch({ type: "SET_MESSAGE_LAYOUT", payload: newLayout });
-      persist({ messageLayout: newLayout });
+      updateConfig({ messageLayout: newLayout });
     } else if (activeTab === "skin") {
       const newSkin = SKIN_NAMES[skinIndex]!;
       dispatch({ type: "SET_SKIN", payload: newSkin });
-      persist({ skin: newSkin });
+      updateConfig({ skin: newSkin });
     } else if (activeTab === "notifications") {
       const { mode } = NOTIFICATION_OPTIONS[notifyIndex]!;
       dispatch({ type: "SET_NOTIFICATIONS", payload: mode });
-      persist({ notifications: mode });
+      updateConfig({ notifications: mode });
     } else {
       const { convert } = EMOTICON_OPTIONS[emoticonIndex]!;
       dispatch({ type: "SET_CONVERT_EMOTICONS", payload: convert });
-      persist({ convertEmoticons: convert });
+      updateConfig({ convertEmoticons: convert });
     }
   }, [activeTab, layoutIndex, skinIndex, notifyIndex, emoticonIndex, dispatch]);
 
@@ -158,44 +189,18 @@ function SettingsPanelInner() {
           </Box>
         </>
       ) : activeTab === "typing" ? (
-        EMOTICON_OPTIONS.map((option, i) => {
-          const isSelected = emoticonIndex === i;
-          return (
-            <React.Fragment key={option.label}>
-              <Box flexDirection="row" marginTop={i === 0 ? 0 : 1}>
-                <Text color={isSelected ? "cyan" : undefined}>{isSelected ? `${skin.glyphs.caret} ` : "  "}</Text>
-                <Text bold color={isSelected ? "cyan" : undefined}>
-                  {option.label}
-                </Text>
-                {state.convertEmoticons === option.convert && <Text dimColor> (current)</Text>}
-              </Box>
-              <Box marginLeft={4}>
-                <Text dimColor>{option.detail}</Text>
-              </Box>
-            </React.Fragment>
-          );
-        })
+        <OptionList
+          options={EMOTICON_OPTIONS}
+          selectedIndex={emoticonIndex}
+          isCurrent={(option) => option.convert === state.convertEmoticons}
+        />
       ) : activeTab === "notifications" ? (
         <>
-          {NOTIFICATION_OPTIONS.map((option, i) => {
-            const isSelected = notifyIndex === i;
-            return (
-              <React.Fragment key={option.mode}>
-                <Box flexDirection="row" marginTop={i === 0 ? 0 : 1}>
-                  <Text color={isSelected ? "cyan" : undefined}>
-                    {isSelected ? `${skin.glyphs.caret} ` : "  "}
-                  </Text>
-                  <Text bold color={isSelected ? "cyan" : undefined}>
-                    {option.label}
-                  </Text>
-                  {state.notifications === option.mode && <Text dimColor> (current)</Text>}
-                </Box>
-                <Box marginLeft={4}>
-                  <Text dimColor>{option.detail}</Text>
-                </Box>
-              </React.Fragment>
-            );
-          })}
+          <OptionList
+            options={NOTIFICATION_OPTIONS}
+            selectedIndex={notifyIndex}
+            isCurrent={(option) => option.mode === state.notifications}
+          />
           <Text> </Text>
           <Text dimColor>Muted chats and the open chat never alert.</Text>
           {!detectDesktopNotify(process.env) && (

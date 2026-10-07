@@ -29,12 +29,14 @@ export function ApiCredentials({ onSubmit, initialApiId = "", initialApiHash = "
   };
 
   const handleApiHashSubmit = (value: string) => {
-    const trimmedHash = value.trim();
-    const trimmedId = apiId.trim();
-    if (trimmedHash && trimmedId) {
-      setApiHash(trimmedHash);
-      onSubmit(trimmedId, trimmedHash);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setError("Paste the API hash from https://my.telegram.org/apps");
+      return;
     }
+    setError(null);
+    setApiHash(trimmed);
+    onSubmit(apiId, trimmed);
   };
 
   return (

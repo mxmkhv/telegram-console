@@ -1,15 +1,6 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
-
-// SettingsPanel's handleSelect calls loadConfig()/saveConfig() with no
-// customDir, i.e. the real ~/.config/telegram-console/config.json. Stub the
-// module so interacting with the settings panel in tests never touches the
-// developer's actual persisted config.
-mock.module("../config", () => ({
-  loadConfig: () => null,
-  saveConfig: () => {},
-}));
 
 import { SettingsPanel } from "./SettingsPanel";
 import { AppProvider } from "../state/context";

@@ -7,13 +7,13 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import type { AppConfig, MessageLayout, NotificationMode, SkinName } from "../types";
+import type { AppConfig, AuthMethod, LogLevel, MessageLayout, NotificationMode, SessionMode } from "../types";
+import { SKIN_NAMES } from "./skins";
 
 const CONFIG_FILENAME = "config.json";
-const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "telegram-console");
-
+// Read on every call, so tests can point it elsewhere before anything is saved
 function getConfigDir(customDir?: string): string {
-  return customDir ?? DEFAULT_CONFIG_DIR;
+  return customDir ?? process.env.TG_CONFIG_DIR ?? join(homedir(), ".config", "telegram-console");
 }
 
 export function getConfigPath(customDir?: string): string {
@@ -24,23 +24,32 @@ export function hasConfig(customDir?: string): boolean {
   return existsSync(getConfigPath(customDir));
 }
 
+/** Everything but the API credentials, as a first login saves it */
+export const DEFAULT_SETTINGS: Omit<AppConfig, "apiId" | "apiHash"> = {
+  sessionPersistence: "persistent",
+  logLevel: "info",
+  authMethod: "qr",
+  messageLayout: "classic",
+  uiMode: "full",
+  noColor: false,
+  skin: "default",
+  notifications: "all",
+  convertEmoticons: true,
+};
+
 export function loadConfig(customDir?: string): AppConfig | null {
   const path = getConfigPath(customDir);
   if (!existsSync(path)) return null;
 
   const content = readFileSync(path, "utf-8");
-  const config = JSON.parse(content) as Partial<AppConfig>;
+  // Settings added since it was saved take their defaults
+  return { ...DEFAULT_SETTINGS, ...(JSON.parse(content) as Partial<AppConfig>) } as AppConfig;
+}
 
-  // Provide default for messageLayout if missing (backwards compatibility)
-  return {
-    ...config,
-    messageLayout: config.messageLayout ?? "classic",
-    uiMode: config.uiMode ?? "full",
-    noColor: config.noColor ?? false,
-    skin: config.skin ?? "default",
-    notifications: config.notifications ?? "all",
-    convertEmoticons: config.convertEmoticons ?? true,
-  } as AppConfig;
+/** Saves a changed setting, keeping the rest */
+export function updateConfig(change: Partial<AppConfig>, customDir?: string): void {
+  const config = loadConfig(customDir);
+  if (config) saveConfig({ ...config, ...change }, customDir);
 }
 
 export function saveConfig(config: AppConfig, customDir?: string): void {
@@ -55,6 +64,9 @@ export function saveConfig(config: AppConfig, customDir?: string): void {
 
 const NOTIFICATION_MODES: NotificationMode[] = ["all", "bell", "off"];
 const MESSAGE_LAYOUTS: MessageLayout[] = ["classic", "bubble"];
+const SESSION_MODES: SessionMode[] = ["persistent", "ephemeral"];
+const LOG_LEVELS: LogLevel[] = ["quiet", "info", "verbose"];
+const AUTH_METHODS: AuthMethod[] = ["qr", "phone"];
 
 // An unknown env value (e.g. TG_NOTIFY=false) falls back to the saved setting
 function parseOption<T extends string>(value: string | undefined, options: readonly T[]): T | undefined {
@@ -75,16 +87,11 @@ export function loadConfigWithEnvOverrides(
         : process.env.TG_API_ID
       : config.apiId,
     apiHash: process.env.TG_API_HASH ?? config.apiHash,
-    sessionPersistence:
-      (process.env.TG_SESSION_MODE as AppConfig["sessionPersistence"]) ??
-      config.sessionPersistence,
-    logLevel:
-      (process.env.TG_LOG_LEVEL as AppConfig["logLevel"]) ?? config.logLevel,
-    authMethod:
-      (process.env.TG_AUTH_METHOD as AppConfig["authMethod"]) ??
-      config.authMethod,
+    sessionPersistence: parseOption(process.env.TG_SESSION_MODE, SESSION_MODES) ?? config.sessionPersistence,
+    logLevel: parseOption(process.env.TG_LOG_LEVEL, LOG_LEVELS) ?? config.logLevel,
+    authMethod: parseOption(process.env.TG_AUTH_METHOD, AUTH_METHODS) ?? config.authMethod,
     messageLayout: parseOption(process.env.TG_MESSAGE_LAYOUT, MESSAGE_LAYOUTS) ?? config.messageLayout,
-    skin: (process.env.TG_SKIN as SkinName) ?? config.skin,
+    skin: parseOption(process.env.TG_SKIN, SKIN_NAMES) ?? config.skin,
     notifications: parseOption(process.env.TG_NOTIFY, NOTIFICATION_MODES) ?? config.notifications,
     noColor:
       process.env.NO_COLOR != null && process.env.NO_COLOR !== ""

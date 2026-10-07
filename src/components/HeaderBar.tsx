@@ -35,10 +35,11 @@ function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
       paddingX={1}
       justifyContent="space-between"
     >
-      <Text bold color="cyan">
+      {/* One row always: on narrow screens the title gives way to the buttons */}
+      <Text bold color="cyan" wrap="truncate">
         telegram-console
       </Text>
-      <Box>
+      <Box flexShrink={0} marginLeft={1}>
         <Text {...settingsStyle}>[Settings]</Text>
         <Text> </Text>
         <Text {...logoutStyle}>[Logout]</Text>

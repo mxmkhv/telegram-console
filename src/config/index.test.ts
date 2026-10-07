@@ -176,6 +176,13 @@ describe("config skin", () => {
     expect(loadConfigWithEnvOverrides(dir)!.skin).toBe("claudeCode");
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("ignores a TG_SKIN it doesn't know", () => {
+    const dir = tmpConfigDir("claudeCode");
+    process.env.TG_SKIN = "neon";
+    expect(loadConfigWithEnvOverrides(dir)!.skin).toBe("claudeCode");
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe("config notifications", () => {

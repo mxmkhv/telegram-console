@@ -1,9 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
-import { Setup } from "./index";
+import { Setup, type Credentials } from "./index";
 import type { QrLoginHandlers } from "../../services/qrLogin";
-import type { AppConfig } from "../../types";
 
 const ENTER = "\r";
 const ESC = String.fromCharCode(27);
@@ -19,7 +18,7 @@ async function type(stdin: { write(data: string): void }, ...keys: string[]) {
 
 describe("Setup", () => {
   it("waits on the welcome screen until Enter", async () => {
-    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} preferredAuthMethod="qr" />);
+    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} />);
     await wait(200);
     expect(lastFrame()).toContain("Welcome to telegram-console");
     expect(lastFrame()).toContain("Press Enter to continue");
@@ -28,7 +27,7 @@ describe("Setup", () => {
   });
 
   it("asks for a numeric API ID", async () => {
-    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} preferredAuthMethod="qr" />);
+    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} />);
     await type(stdin, ENTER, "abc", ENTER);
     expect(lastFrame()).toContain("The API ID is a number");
     expect(lastFrame()).not.toContain("API Hash:");
@@ -40,7 +39,7 @@ describe("Setup", () => {
       attempts.push([apiId, apiHash]);
       throw new Error("Telegram doesn't accept this API ID and hash");
     };
-    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} preferredAuthMethod="qr" login={login} />);
+    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} login={login} />);
     await type(stdin, ENTER, "123", ENTER, "hash", ENTER);
     expect(lastFrame()).toContain("Error: Telegram doesn't accept this API ID and hash");
     expect(lastFrame()).toContain("Enter to try again");
@@ -64,9 +63,9 @@ describe("Setup", () => {
       handlers = h;
       return new Promise<string>((resolve) => (finish = resolve));
     };
-    let completed: [AppConfig, string] | undefined;
+    let completed: [Credentials, string] | undefined;
     const { lastFrame, stdin } = render(
-      <Setup onComplete={(config, session) => (completed = [config, session])} preferredAuthMethod="qr" login={login} />,
+      <Setup onComplete={(config, session) => (completed = [config, session])} login={login} />,
     );
     await type(stdin, ENTER, "123", ENTER, "hash", ENTER);
 
@@ -86,7 +85,40 @@ describe("Setup", () => {
 
     finish("session");
     await wait();
-    expect(completed?.[1]).toBe("session");
-    expect(completed?.[0].apiId).toBe("123");
+    expect(completed).toEqual([{ apiId: "123", apiHash: "hash" }, "session"]);
+  });
+
+  it("gives up a login still waiting when you press Esc", async () => {
+    let signal!: AbortSignal;
+    const login = (_apiId: number, _apiHash: string, _h: QrLoginHandlers, s: AbortSignal) => {
+      signal = s;
+      return new Promise<string>(() => {});
+    };
+    const { lastFrame, stdin } = render(<Setup onComplete={() => {}} login={login} />);
+    await type(stdin, ENTER, "123", ENTER, "hash", ENTER);
+    expect(lastFrame()).toContain("Connecting to Telegram...");
+
+    await type(stdin, ESC);
+    expect(signal.aborted).toBe(true);
+    expect(lastFrame()).toContain("API ID: 123");
+  });
+
+  it("goes straight to the QR code with saved credentials, and gives up when closed", async () => {
+    const attempts: Array<[number, string]> = [];
+    let signal!: AbortSignal;
+    const login = (apiId: number, apiHash: string, _h: QrLoginHandlers, s: AbortSignal) => {
+      attempts.push([apiId, apiHash]);
+      signal = s;
+      return new Promise<string>(() => {});
+    };
+    const { lastFrame, unmount } = render(
+      <Setup onComplete={() => {}} savedCredentials={{ apiId: "123", apiHash: "hash" }} login={login} />,
+    );
+    await wait();
+    expect(lastFrame()).toContain("Scan QR Code");
+    expect(attempts).toEqual([[123, "hash"]]);
+
+    unmount();
+    expect(signal.aborted).toBe(true);
   });
 });
