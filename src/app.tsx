@@ -30,6 +30,7 @@ import { withTimeout } from "./utils/withTimeout";
 const DELIVERY_TIMEOUT_MS = 30_000;
 // A stalled load turns into the error state, which Ctrl+R can retry
 const LOAD_TIMEOUT_MS = 30_000;
+const MESSAGE_PAGE_SIZE = 50;
 const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
 import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
@@ -246,19 +247,31 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
         : "ready";
   const chatsStatus: LoadStatus = initFailed ? "error" : chatsLoaded ? "ready" : "loading";
 
-  // Ctrl+R retries whatever failed to load
-  const canRetry = initFailed || messagesStatus === "error";
-  const retry = useCallback(() => {
-    if (initFailed) {
-      retryInit();
-      return;
-    }
-    dispatch({ type: "CLEAR_NOTICE" });
-    setLoadAttempt((n) => n + 1);
-  }, [initFailed, retryInit, dispatch]);
 
   // Messages sent while the connection was down never arrive as updates, so
-  // reload the chat list and the open chat once it's back
+  // reload the chat list and the open chat once it's back. Ctrl+R retries.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshAfterReconnect = useCallback(() => {
+    setRefreshFailed(false);
+    const failed = (what: string) => (err: unknown) => {
+      setRefreshFailed(true);
+      showError(`Reconnected, but couldn't refresh ${what}: press Ctrl+R to retry (${describeError(err)})`, true);
+    };
+    telegramService.getChats().then((chats) => {
+      // The open chat was read here, whatever the server counted meanwhile
+      const openChatId = stateRef.current.selectedChatId;
+      dispatch({ type: "SET_CHATS", payload: chats.map((c) => (c.id === openChatId ? { ...c, unreadCount: 0 } : c)) });
+    }, failed("your chats"));
+
+    // The reducer merges by id against the list as it is then, so live
+    // messages that land meanwhile can't hide the missed ones
+    const chatId = stateRef.current.selectedChatId;
+    if (!chatId) return;
+    telegramService.getMessages(chatId, MESSAGE_PAGE_SIZE).then((page) => {
+      dispatch({ type: "MERGE_MESSAGES", payload: { chatId, messages: page, pageFull: page.length >= MESSAGE_PAGE_SIZE } });
+    }, failed("this chat"));
+  }, [telegramService, dispatch, showError]);
+
   const connectionDropped = useRef(false);
   useEffect(() => {
     if (!chatsLoaded) return;
@@ -268,30 +281,23 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
     }
     if (!connectionDropped.current) return;
     connectionDropped.current = false;
-    const failed = (what: string) => (err: unknown) =>
-      showError(`Reconnected, but couldn't refresh ${what}: reopen the chat to see what you missed (${describeError(err)})`);
-    telegramService.getChats().then((chats) => {
-      // The open chat was read here, whatever the server counted meanwhile
-      const openChatId = stateRef.current.selectedChatId;
-      dispatch({ type: "SET_CHATS", payload: chats.map((c) => (c.id === openChatId ? { ...c, unreadCount: 0 } : c)) });
-    }, failed("your chats"));
+    refreshAfterReconnect();
+  }, [state.connectionState, chatsLoaded, refreshAfterReconnect]);
 
-    // Add what arrived to the open chat, keeping older pages already scrolled through
-    const chatId = stateRef.current.selectedChatId;
-    if (!chatId) return;
-    telegramService.getMessages(chatId).then((latest) => {
-      const known = stateRef.current.messages[chatId];
-      const newestKnown = known?.findLast((m) => m.id > 0)?.id;
-      // Nothing to keep, or more was missed than one page: start from the latest
-      if (newestKnown === undefined || (latest[0] && latest[0].id > newestKnown)) {
-        dispatch({ type: "SET_MESSAGES", payload: { chatId, messages: latest } });
-        return;
-      }
-      for (const message of latest) {
-        if (message.id > newestKnown) dispatch({ type: "ADD_MESSAGE", payload: { chatId, message } });
-      }
-    }, failed("this chat"));
-  }, [state.connectionState, chatsLoaded, telegramService, dispatch, showError]);
+  // Ctrl+R retries whatever failed to load
+  const canRetry = initFailed || refreshFailed || messagesStatus === "error";
+  const retry = useCallback(() => {
+    if (initFailed) {
+      retryInit();
+      return;
+    }
+    dispatch({ type: "CLEAR_NOTICE" });
+    if (refreshFailed) {
+      refreshAfterReconnect();
+      return;
+    }
+    setLoadAttempt((n) => n + 1);
+  }, [initFailed, refreshFailed, retryInit, refreshAfterReconnect, dispatch]);
 
   // Focus media panel when it opens
   useEffect(() => {

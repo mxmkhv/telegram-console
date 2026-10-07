@@ -24,8 +24,12 @@ describe("escape sequences", () => {
     expect(sequence).toBe("\x1b]9;Elon: line one line two ]2;pwned\x07");
   });
 
-  it("formats kitty's title and body", () => {
-    expect(desktopNotification("osc99", "Elon", "hi")).toBe("\x1b]99;i=1:d=0;Elon\x1b\\\x1b]99;i=1:d=1:p=body;hi\x1b\\");
+  it("formats kitty's title and body, with an id of its own so it doesn't replace the last one", () => {
+    const first = desktopNotification("osc99", "Elon", "hi");
+    const id = first.match(/i=(\d+):d=0/)![1];
+    expect(first).toBe(`\x1b]99;i=${id}:d=0;Elon\x1b\\\x1b]99;i=${id}:d=1:p=body;hi\x1b\\`);
+    const second = desktopNotification("osc99", "Donald", "hello");
+    expect(second.match(/i=(\d+):d=0/)![1]).not.toBe(id);
   });
 
   it("keeps ; out of OSC 777's fields", () => {

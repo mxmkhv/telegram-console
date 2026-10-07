@@ -39,15 +39,20 @@ export function detectDesktopNotify(env: Record<string, string | undefined>): De
   return null;
 }
 
+// kitty replaces a shown notification that has the same id, so each one gets its own
+let kittyId = 0;
+
 export function desktopNotification(protocol: DesktopNotifyProtocol, title: string, body: string): string {
   const safeTitle = clean(title, 60);
   const safeBody = clean(body, 200);
   switch (protocol) {
     case "osc9":
       return `${ESC}]9;${safeTitle}: ${safeBody}${BEL}`;
-    case "osc99":
-      // kitty: the title, then the body (p=body) of the same notification (i=1)
-      return `${ESC}]99;i=1:d=0;${safeTitle}${ST}${ESC}]99;i=1:d=1:p=body;${safeBody}${ST}`;
+    case "osc99": {
+      // kitty: the title, then the body (p=body) of the same notification
+      const id = ++kittyId;
+      return `${ESC}]99;i=${id}:d=0;${safeTitle}${ST}${ESC}]99;i=${id}:d=1:p=body;${safeBody}${ST}`;
+    }
     case "osc777":
       // ";" separates the fields
       return `${ESC}]777;notify;${safeTitle.replace(/;/g, ",")};${safeBody.replace(/;/g, ",")}${BEL}`;

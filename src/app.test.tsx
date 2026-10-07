@@ -551,6 +551,67 @@ describe("MainApp connection drops", () => {
     expect(lastFrame()).toContain("(9/9)");
   });
 
+  it("keeps messages missed offline when a live one lands during the catch-up", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    stdin.write("\r");
+    await wait();
+
+    svc.simulateConnectionDrop();
+    svc.simulateIncomingMessage("1", "missed one");
+    await wait(5);
+    svc.simulateIncomingMessage("1", "missed two");
+    // The catch-up request returns, but a live message gets in first
+    const getMessages = svc.getMessages.bind(svc);
+    svc.getMessages = async (...args) => {
+      const page = await getMessages(...args);
+      await wait(5);
+      svc.simulateIncomingMessage("1", "live during catch-up");
+      // Rendered before the page is handled
+      await wait(30);
+      return page;
+    };
+    svc.simulateConnectionRestore();
+    await wait(200);
+    // The message panel only: the chat list shows the newest as its preview
+    const messages = lastFrame()!
+      .split("\n")
+      .map((line) => line.split("││")[1] ?? "")
+      .join("\n");
+    const order = ["missed one", "missed two", "live during catch-up"].map((text) => messages.indexOf(text));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("offers Ctrl+R when the chat list can't be refreshed after reconnecting", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    const getChats = svc.getChats.bind(svc);
+    let calls = 0;
+    svc.getChats = async () => {
+      if (++calls === 1) throw new Error("FLOOD_WAIT_3");
+      return getChats();
+    };
+    svc.simulateConnectionDrop();
+    await wait();
+    svc.simulateConnectionRestore();
+    await wait();
+    expect(lastFrame()).toContain("press Ctrl+R to retry");
+
+    stdin.write("\x12");
+    await wait(150);
+    expect(calls).toBe(2);
+    expect(lastFrame()).not.toContain("press Ctrl+R to retry");
+  });
+
 });
 
 describe("MainApp terminal notifications", () => {

@@ -46,6 +46,7 @@ export type AppAction =
   | { type: "SET_CHATS"; payload: Chat[] }
   | { type: "SELECT_CHAT"; payload: string }
   | { type: "SET_MESSAGES"; payload: { chatId: string; messages: Message[] } }
+  | { type: "MERGE_MESSAGES"; payload: { chatId: string; messages: Message[]; pageFull: boolean } }
   | { type: "ADD_MESSAGE"; payload: { chatId: string; message: Message } }
   | { type: "PREPEND_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "SET_FOCUSED_PANEL"; payload: AppState["focusedPanel"] }
@@ -239,6 +240,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
             state.messages[action.payload.chatId],
           ),
         },
+      };
+    }
+
+    case "MERGE_MESSAGES": {
+      // The newest page after a reconnect: add what was missed by id, keeping
+      // older pages already scrolled through. A full page whose oldest message
+      // isn't known may have left a gap behind it, so it replaces the list.
+      const { chatId, messages: page, pageFull } = action.payload;
+      const existing = state.messages[chatId] ?? [];
+      const known = new Set(existing.map((m) => m.id));
+      if (existing.length === 0 || (pageFull && page[0] && !known.has(page[0].id))) {
+        return appReducer(state, { type: "SET_MESSAGES", payload: { chatId, messages: page } });
+      }
+      const fetched = new Map(page.map((m) => [m.id, m]));
+      // Fresh copies win, except while your own send or edit is in flight
+      const current = existing.map((m) => (m.delivery ? m : (fetched.get(m.id) ?? m)));
+      const confirmed = [...current.filter((m) => m.id > 0), ...page.filter((m) => !known.has(m.id))].sort(
+        (a, b) => a.id - b.id,
+      );
+      const merged = [...confirmed, ...current.filter((m) => m.id < 0)];
+      const newest = confirmed.at(-1);
+      return {
+        ...state,
+        chats: newest
+          ? withLastMessage(state.chats, chatId, (last) => (last.id > 0 && newest.id > last.id ? newest : last))
+          : state.chats,
+        senderColors: withSenderColors(state.senderColors, chatId, merged),
+        messages: { ...state.messages, [chatId]: merged },
       };
     }
 
