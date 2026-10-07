@@ -177,6 +177,30 @@ describe("InputBar", () => {
       expect(submittedText).toBe(`great news ${GRINNING_FACE}`);
     });
 
+    it("keeps emoticons as typed when conversion is off", async () => {
+      let submittedText = "";
+      const { stdin } = render(
+        <InputBar
+          width={80}
+          isFocused={true}
+          onSubmit={(text) => (submittedText = text)}
+          selectedChatId="123"
+          convertEmoticons={false}
+        />
+      );
+
+      stdin.write("tongue :P");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stdin.write(" ");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stdin.write("grin :D");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      stdin.write("\r");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(submittedText).toBe("tongue :P grin :D");
+    });
+
     it("shows converted emoji in input field after space trigger", async () => {
       const { lastFrame, stdin } = render(
         <InputBar width={80} isFocused={true} onSubmit={mockOnSubmit} selectedChatId="123" />

@@ -89,6 +89,20 @@ export const EMOTICON_MAP: Record<string, string> = {
 };
 
 /**
+ * Whether the end of `text` is inside code. Like Markdown, a run of backticks
+ * opens code that only a run of the same length closes, so a template
+ * literal's ` inside a ``` block doesn't end it.
+ */
+function isInsideCode(text: string): boolean {
+  let openedBy: number | null = null;
+  for (const [run] of text.matchAll(/`+/g)) {
+    if (openedBy === null) openedBy = run.length;
+    else if (run.length === openedBy) openedBy = null;
+  }
+  return openedBy !== null;
+}
+
+/**
  * Transforms the last emoticon before the cursor position into its emoji equivalent.
  * Only transforms emoticons that are complete words (not part of URLs or other text).
  *
@@ -119,7 +133,8 @@ export function transformEmoticons(
 
   // Check if word matches an emoticon (O(1) lookup)
   const emoji = EMOTICON_MAP[word];
-  if (!emoji) {
+  // Inside `code` or a ``` block, keep it as typed
+  if (!emoji || isInsideCode(text.slice(0, wordStart))) {
     return { text, cursorAdjustment: 0 };
   }
 

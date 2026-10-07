@@ -1,15 +1,6 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
-
-// SettingsPanel's handleSelect calls loadConfig()/saveConfig() with no
-// customDir, i.e. the real ~/.config/telegram-console/config.json. Stub the
-// module so interacting with the settings panel in tests never touches the
-// developer's actual persisted config.
-mock.module("../config", () => ({
-  loadConfig: () => null,
-  saveConfig: () => {},
-}));
 
 import { SettingsPanel } from "./SettingsPanel";
 import { AppProvider } from "../state/context";
@@ -103,6 +94,22 @@ describe("SettingsPanel notifications", () => {
     const { stdin, lastFrame } = renderPanel();
     stdin.write(ESC + "[D");
     await wait();
-    expect(lastFrame()).toContain("[ Notifications ]");
+    expect(lastFrame()).toContain("[ Typing ]");
+  });
+});
+
+describe("SettingsPanel typing", () => {
+  it("turns emoticon conversion off", async () => {
+    const { stdin, lastFrame } = renderPanel();
+    stdin.write(ESC + "[D");
+    await wait();
+    const currentLine = () => (lastFrame() ?? "").split("\n").find((line) => line.includes("(current)"));
+    expect(currentLine()).toContain("Convert to emoji");
+
+    stdin.write(DOWN);
+    await wait();
+    stdin.write(ENTER);
+    await wait();
+    expect(currentLine()).toContain("Keep as typed");
   });
 });

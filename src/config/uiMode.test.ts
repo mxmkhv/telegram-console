@@ -28,7 +28,7 @@ test("loadConfig defaults uiMode to 'full' when missing", () => {
 test("saveConfig round-trips uiMode", () => {
   const dir = tmp();
   saveConfig(
-    { apiId: 1, apiHash: "h", sessionPersistence: "persistent", logLevel: "quiet", authMethod: "qr", messageLayout: "classic", uiMode: "minimal", noColor: false, skin: "default", notifications: "all" },
+    { apiId: 1, apiHash: "h", sessionPersistence: "persistent", logLevel: "quiet", authMethod: "qr", messageLayout: "classic", uiMode: "minimal", noColor: false, skin: "default", notifications: "all", convertEmoticons: true },
     dir,
   );
   expect(loadConfig(dir)?.uiMode).toBe("minimal");

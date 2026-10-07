@@ -31,6 +31,7 @@ describe("Config", () => {
       noColor: false,
       skin: "default" as const,
       notifications: "all" as const,
+      convertEmoticons: true,
     };
 
     saveConfig(config, TEST_CONFIG_DIR);
@@ -77,6 +78,7 @@ describe("Environment Overrides", () => {
       noColor: false,
       skin: "default" as const,
       notifications: "all" as const,
+      convertEmoticons: true,
     };
     saveConfig(config, TEST_CONFIG_DIR);
 
@@ -174,6 +176,13 @@ describe("config skin", () => {
     expect(loadConfigWithEnvOverrides(dir)!.skin).toBe("claudeCode");
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("ignores a TG_SKIN it doesn't know", () => {
+    const dir = tmpConfigDir("claudeCode");
+    process.env.TG_SKIN = "neon";
+    expect(loadConfigWithEnvOverrides(dir)!.skin).toBe("claudeCode");
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe("config notifications", () => {
@@ -204,6 +213,26 @@ describe("config notifications", () => {
     expect(loadConfigWithEnvOverrides(dir)!.notifications).toBe("off");
     process.env.TG_NOTIFY = "false";
     expect(loadConfigWithEnvOverrides(dir)!.notifications).toBe("bell");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("config message layout", () => {
+  const prev = process.env.TG_MESSAGE_LAYOUT;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.TG_MESSAGE_LAYOUT;
+    else process.env.TG_MESSAGE_LAYOUT = prev;
+  });
+
+  it("takes TG_MESSAGE_LAYOUT over the saved layout, but ignores values it doesn't know", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tgc-cfg-layout-"));
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ apiId: 1, apiHash: "h", messageLayout: "bubble" }));
+    delete process.env.TG_MESSAGE_LAYOUT;
+    expect(loadConfigWithEnvOverrides(dir)!.messageLayout).toBe("bubble");
+    process.env.TG_MESSAGE_LAYOUT = "classic";
+    expect(loadConfigWithEnvOverrides(dir)!.messageLayout).toBe("classic");
+    process.env.TG_MESSAGE_LAYOUT = "bubbles";
+    expect(loadConfigWithEnvOverrides(dir)!.messageLayout).toBe("bubble");
     rmSync(dir, { recursive: true, force: true });
   });
 });

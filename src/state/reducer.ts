@@ -4,9 +4,6 @@ import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 interface MediaPanelState {
   isOpen: boolean;
   messageId: number | null;
-  loading: boolean;
-  imageData: string | null;
-  error: string | null;
 }
 
 export interface AppState {
@@ -26,6 +23,7 @@ export interface AppState {
   uiMode: UiMode;
   skin: SkinName;
   notifications: NotificationMode;
+  convertEmoticons: boolean;
   replyingToMessage: Message | null;
   editingMessage: Message | null;
   isHidden: boolean;
@@ -61,14 +59,12 @@ export type AppAction =
   // Media panel actions
   | { type: "OPEN_MEDIA_PANEL"; payload: { messageId: number } }
   | { type: "CLOSE_MEDIA_PANEL" }
-  | { type: "SET_MEDIA_LOADING"; payload: boolean }
-  | { type: "SET_MEDIA_DATA"; payload: string }
-  | { type: "SET_MEDIA_ERROR"; payload: string }
   // Inline preview actions
   | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout }
   | { type: "SET_NOTIFICATIONS"; payload: NotificationMode }
   | { type: "SET_UI_MODE"; payload: UiMode }
   | { type: "SET_SKIN"; payload: SkinName }
+  | { type: "SET_CONVERT_EMOTICONS"; payload: boolean }
   | { type: "SET_HIDDEN"; payload: boolean }
   // Reaction actions
   | { type: "ADD_REACTION"; payload: { chatId: string; messageId: number; emoji: string } }
@@ -107,17 +103,12 @@ export const initialState: AppState = {
   currentView: "chat",
   showLogoutPrompt: false,
   headerSelectedButton: "settings",
-  mediaPanel: {
-    isOpen: false,
-    messageId: null,
-    loading: false,
-    imageData: null,
-    error: null,
-  },
+  mediaPanel: { isOpen: false, messageId: null },
   messageLayout: "classic",
   uiMode: "full",
   skin: "default",
   notifications: "all",
+  convertEmoticons: true,
   replyingToMessage: null,
   editingMessage: null,
   isHidden: false,
@@ -399,57 +390,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "OPEN_MEDIA_PANEL":
       return {
         ...state,
-        mediaPanel: {
-          isOpen: true,
-          messageId: action.payload.messageId,
-          loading: false,
-          imageData: null,
-          error: null,
-        },
+        mediaPanel: { isOpen: true, messageId: action.payload.messageId },
       };
 
     case "CLOSE_MEDIA_PANEL":
       return {
         ...state,
-        mediaPanel: {
-          isOpen: false,
-          messageId: null,
-          loading: false,
-          imageData: null,
-          error: null,
-        },
-      };
-
-    case "SET_MEDIA_LOADING":
-      return {
-        ...state,
-        mediaPanel: {
-          ...state.mediaPanel,
-          loading: action.payload,
-          error: null,
-        },
-      };
-
-    case "SET_MEDIA_DATA":
-      return {
-        ...state,
-        mediaPanel: {
-          ...state.mediaPanel,
-          loading: false,
-          imageData: action.payload,
-          error: null,
-        },
-      };
-
-    case "SET_MEDIA_ERROR":
-      return {
-        ...state,
-        mediaPanel: {
-          ...state.mediaPanel,
-          loading: false,
-          imageData: null,
-          error: action.payload,
-        },
+        mediaPanel: initialState.mediaPanel,
       };
 
     case "SET_MESSAGE_LAYOUT":
@@ -463,6 +410,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     case "SET_SKIN":
       return { ...state, skin: action.payload };
+
+    case "SET_CONVERT_EMOTICONS":
+      return { ...state, convertEmoticons: action.payload };
 
     case "SET_HIDDEN":
       return { ...state, isHidden: action.payload };

@@ -1,7 +1,7 @@
 import type { Api } from "telegram";
 
-type LogLevel = "quiet" | "info" | "verbose";
-type SessionMode = "persistent" | "ephemeral";
+export type LogLevel = "quiet" | "info" | "verbose";
+export type SessionMode = "persistent" | "ephemeral";
 export type AuthMethod = "qr" | "phone";
 export type MessageLayout = "classic" | "bubble";
 export type UiMode = "full" | "minimal";
@@ -18,6 +18,8 @@ export interface AppConfig {
   noColor: boolean;
   skin: SkinName;
   notifications: NotificationMode;
+  /** Turn :) into 🙂 as you type */
+  convertEmoticons: boolean;
 }
 
 /** For new messages in chats you're not viewing; the title's unread count shows either way */
