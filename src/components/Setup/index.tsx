@@ -76,6 +76,8 @@ export function Setup({ onComplete, savedCredentials, login = loginWithQrCode }:
           },
           attempt.signal,
         );
+        // Given up on while it was finishing: you've gone back to the credentials
+        if (attempt.signal.aborted) return;
         onComplete({ apiId, apiHash }, session);
       } catch (err) {
         // Given up on: what's on screen now is something else

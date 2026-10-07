@@ -103,6 +103,20 @@ describe("Setup", () => {
     expect(lastFrame()).toContain("API ID: 123");
   });
 
+  it("doesn't finish a login given up on while it was closing", async () => {
+    let finish!: (session: string) => void;
+    const login = () => new Promise<string>((resolve) => (finish = resolve));
+    let completed = false;
+    const { lastFrame, stdin } = render(<Setup onComplete={() => (completed = true)} login={login} />);
+    await type(stdin, ENTER, "123", ENTER, "hash", ENTER);
+
+    await type(stdin, ESC);
+    finish("session");
+    await wait();
+    expect(completed).toBe(false);
+    expect(lastFrame()).toContain("API ID: 123");
+  });
+
   it("goes straight to the QR code with saved credentials, and gives up when closed", async () => {
     const attempts: Array<[number, string]> = [];
     let signal!: AbortSignal;

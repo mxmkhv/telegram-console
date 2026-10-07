@@ -244,6 +244,14 @@ describe("transformEmoticons", () => {
       expect(transformEmoticons("```\nfoo :D ", 11).text).toBe("```\nfoo :D ");
     });
 
+    it("stays in a ``` block past a template literal's backticks", () => {
+      // Four backticks before it: an even count, but still inside the block
+      const text = "```\nconst s = `first line\n:D ";
+      expect(transformEmoticons(text, text.length).text).toBe(text);
+      const after = "```\nconst s = `hi`;\n```\n:D ";
+      expect(transformEmoticons(after, after.length).text).toBe("```\nconst s = `hi`;\n```\n\u{1F603} ");
+    });
+
     it("converts again once the code span is closed", () => {
       expect(transformEmoticons("`a` :) ", 7).text).toBe("`a` \u{1F642} ");
     });
