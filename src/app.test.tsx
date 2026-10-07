@@ -5,6 +5,7 @@ import { App } from "./app";
 import { AppProvider } from "./state/context";
 import { createMockTelegramService, type MockFailures } from "./services/telegram.mock";
 import { MainApp } from "./app";
+import { popTitle, pushTitle, setTitle } from "./services/terminalNotify";
 
 describe("App Integration", () => {
   it("renders without crashing in mock mode", () => {
@@ -38,7 +39,7 @@ describe("MainApp hidden mode", () => {
     await new Promise((r) => setTimeout(r, 50));
     const hidden = lastFrame() ?? "";
     expect(hidden).not.toContain("Chats");
-    expect(hidden.trim()).toBe("");
+    expect(hidden.trim()).toBe("any key to return");
 
     stdin.write(" ");
     await new Promise((r) => setTimeout(r, 50));
@@ -493,6 +494,194 @@ describe("MainApp help overlay", () => {
 
     await press(stdin, "s");
     expect(lastFrame()).toContain("Switch tab");
+  });
+});
+
+describe("MainApp connection drops", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+
+  it("shows a dropped connection and reloads chats once it's back", async () => {
+    const { lastFrame } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    expect(lastFrame()).toContain("[Connected]");
+    let chatLoads = 0;
+    const getChats = svc.getChats.bind(svc);
+    svc.getChats = () => {
+      chatLoads++;
+      return getChats();
+    };
+
+    svc.simulateConnectionDrop();
+    await wait();
+    expect(lastFrame()).toContain("[Connecting...]");
+    expect(chatLoads).toBe(0);
+
+    svc.simulateConnectionRestore();
+    await wait();
+    expect(lastFrame()).toContain("[Connected]");
+    expect(chatLoads).toBe(1);
+  });
+
+  it("shows messages that arrived in the open chat while offline", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    stdin.write("\r");
+    await wait();
+
+    svc.simulateConnectionDrop();
+    svc.simulateIncomingMessage("1", "sent while you were away");
+    await wait();
+    expect(lastFrame()).not.toContain("sent while you were away");
+
+    svc.simulateConnectionRestore();
+    await wait(150);
+    expect(lastFrame()).toContain("sent while you were away");
+    expect(lastFrame()).toContain("(9/9)");
+  });
+
+  it("keeps messages missed offline when a live one lands during the catch-up", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    stdin.write("\r");
+    await wait();
+
+    svc.simulateConnectionDrop();
+    svc.simulateIncomingMessage("1", "missed one");
+    await wait(5);
+    svc.simulateIncomingMessage("1", "missed two");
+    // The catch-up request returns, but a live message gets in first
+    const getMessages = svc.getMessages.bind(svc);
+    svc.getMessages = async (...args) => {
+      const page = await getMessages(...args);
+      await wait(5);
+      svc.simulateIncomingMessage("1", "live during catch-up");
+      // Rendered before the page is handled
+      await wait(30);
+      return page;
+    };
+    svc.simulateConnectionRestore();
+    await wait(200);
+    // The message panel only: the chat list shows the newest as its preview
+    const messages = lastFrame()!
+      .split("\n")
+      .map((line) => line.split("││")[1] ?? "")
+      .join("\n");
+    const order = ["missed one", "missed two", "live during catch-up"].map((text) => messages.indexOf(text));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("offers Ctrl+R when the chat list can't be refreshed after reconnecting", async () => {
+    const { lastFrame, stdin } = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    const getChats = svc.getChats.bind(svc);
+    let calls = 0;
+    svc.getChats = async () => {
+      if (++calls === 1) throw new Error("FLOOD_WAIT_3");
+      return getChats();
+    };
+    svc.simulateConnectionDrop();
+    await wait();
+    svc.simulateConnectionRestore();
+    await wait();
+    expect(lastFrame()).toContain("press Ctrl+R to retry");
+
+    stdin.write("\x12");
+    await wait(150);
+    expect(calls).toBe(2);
+    expect(lastFrame()).not.toContain("press Ctrl+R to retry");
+  });
+
+});
+
+describe("MainApp terminal notifications", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const BELL = "\x07";
+  const renderApp = (writes: string[], initialNotifications?: "all" | "bell" | "off") =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full" initialNotifications={initialNotifications}>
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} writeToTerminal={(data) => writes.push(data)} />
+      </AppProvider>
+    );
+
+  it("counts unread messages from unmuted chats in the window title, and restores it on exit", async () => {
+    const writes: string[] = [];
+    const { unmount } = renderApp(writes);
+    await wait(250);
+    expect(writes[0]).toBe(pushTitle());
+    // 47 + 3 + 1 + 2 + 5; the muted group's 99 don't count
+    expect(writes.at(-1)).toBe(setTitle("(58) telegram-console"));
+    unmount();
+    expect(writes.at(-1)).toBe(popTitle());
+  });
+
+  it("rings for other chats, but not the open one, a muted one, or while hidden", async () => {
+    const writes: string[] = [];
+    const { stdin } = renderApp(writes);
+    await wait(250);
+    stdin.write("\r");
+    await wait();
+
+    svc.simulateIncomingMessage("1", "in the open chat");
+    svc.simulateIncomingMessage("4", "in the muted group");
+    await wait();
+    expect(writes).not.toContain(BELL);
+
+    svc.simulateIncomingMessage("2", "elsewhere");
+    await wait();
+    expect(writes.filter((w) => w === BELL)).toHaveLength(1);
+  });
+
+  it("stays quiet while hidden, giving the window title back", async () => {
+    const writes: string[] = [];
+    const { stdin, lastFrame } = renderApp(writes);
+    await wait(250);
+    stdin.write("h");
+    await wait();
+    expect(writes.at(-1)).toBe(popTitle());
+
+    svc.simulateIncomingMessage("2", "while hidden");
+    svc.simulateIncomingMessage("4", "muted group");
+    await wait();
+    expect(writes).not.toContain(BELL);
+    expect(lastFrame()).toContain("1 new · any key to return");
+
+    stdin.write("x");
+    await wait();
+    expect(writes.slice(-2)).toEqual([pushTitle(), setTitle("(59) telegram-console")]);
+  });
+
+  it("stays quiet when turned off", async () => {
+    const writes: string[] = [];
+    renderApp(writes, "off");
+    await wait(250);
+    svc.simulateIncomingMessage("2", "elsewhere");
+    await wait();
+    expect(writes).not.toContain(BELL);
   });
 });
 

@@ -1,6 +1,8 @@
 import { TelegramClient, Api, utils } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent, Raw } from "telegram/events";
+import { UpdateConnectionState } from "telegram/network";
+import { createConnectionWatchdog, readConnectionReport } from "./connectionWatchdog";
 import type { TelegramService, ConnectionState, Message, MediaAttachment } from "../types";
 
 // Type for sender objects from GramJS (User, Chat, or Channel)
@@ -85,6 +87,14 @@ function extractMedia(msg: Api.Message): MediaAttachment | undefined {
   }
 
   return undefined;
+}
+
+// Muted until a time still ahead (forever is a far-off date). A chat that
+// follows the account's default for its type isn't marked, even if that mutes it.
+function isMuted(dialog: Api.TypeDialog | undefined): boolean {
+  if (!(dialog instanceof Api.Dialog)) return false;
+  const muteUntil = dialog.notifySettings.muteUntil;
+  return muteUntil !== undefined && muteUntil * 1000 > Date.now();
 }
 
 function capitalize(s: string): string {
@@ -207,23 +217,44 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
     connectionCallback?.(state);
   }
 
+  // Set while we disconnect on purpose, so the drop isn't treated as one
+  let disconnecting = false;
+  const watchdog = createConnectionWatchdog({
+    async reconnect() {
+      if (disconnecting) return false;
+      const connected = (await client.connect()) || !!client.connected;
+      // Logged out while that was in flight: don't leave a live connection behind
+      if (disconnecting) {
+        await client.disconnect();
+        return false;
+      }
+      return connected;
+    },
+    // GramJS is still retrying on its own
+    isRecovering: () => !!client._sender?.isReconnecting,
+    onStateChange: setConnectionState,
+  });
+
   return {
     client,
 
     async connect() {
+      disconnecting = false;
       setConnectionState("connecting");
       // GramJS resolves false (instead of throwing) once its retries run out,
       // and also when already connected
-      let connected: boolean;
       try {
-        connected = (await client.connect()) || !!client.connected;
+        const connected = (await client.connect()) || !!client.connected;
+        if (!connected) {
+          throw new Error("Couldn't reach Telegram servers. Check your network connection");
+        }
+        // GramJS looks up the account before dispatching each update until it
+        // has it. Fetch it now, or a drop reported before any other update
+        // would wait for the network it just lost.
+        await client.getMe(true);
       } catch (err) {
         setConnectionState("disconnected");
         throw err;
-      }
-      if (!connected) {
-        setConnectionState("disconnected");
-        throw new Error("Couldn't reach Telegram servers. Check your network connection");
       }
       setConnectionState("connected");
       onSessionUpdate?.(String(client.session.save()));
@@ -270,10 +301,28 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
             }, TYPING_TIMEOUT_MS),
           );
         }, new Raw({}));
+
+        // GramJS reports drops it notices (failed pings, closed sockets, waking
+        // from sleep) and when it gets the connection back
+        client.addEventHandler(
+          (update: UpdateConnectionState) => {
+            if (disconnecting) return;
+            const report = readConnectionReport(update.state === UpdateConnectionState.connected, {
+              wasConnected: connectionState === "connected",
+              reconnecting: !!client._sender?.isReconnecting,
+              connected: !!client.connected,
+            });
+            if (report === "restored") watchdog.restored();
+            else if (report === "lost") watchdog.lost();
+          },
+          new Raw({ types: [UpdateConnectionState] }),
+        );
       }
     },
 
     async disconnect() {
+      disconnecting = true;
+      watchdog.stop();
       _typingTimers.forEach((timer) => clearTimeout(timer));
       _typingTimers.clear();
       await client.disconnect();
@@ -296,6 +345,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           title: d.title ?? "Unknown",
           unreadCount: d.unreadCount ?? 0,
           isGroup: d.isGroup ?? false,
+          isMuted: isMuted(d.dialog),
           // getDialogs attaches each message's sender, so this needs no extra request
           // MessageEmpty has no date (or anything else worth previewing)
           lastMessage: d.message?.date ? toMessage(d.message, d.message.sender as GramJSSender | undefined) : undefined,

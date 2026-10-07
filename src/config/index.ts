@@ -7,7 +7,7 @@ import {
 } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import type { AppConfig, MessageLayout, SkinName } from "../types";
+import type { AppConfig, MessageLayout, NotificationMode, SkinName } from "../types";
 
 const CONFIG_FILENAME = "config.json";
 const DEFAULT_CONFIG_DIR = join(homedir(), ".config", "telegram-console");
@@ -38,6 +38,7 @@ export function loadConfig(customDir?: string): AppConfig | null {
     uiMode: config.uiMode ?? "full",
     noColor: config.noColor ?? false,
     skin: config.skin ?? "default",
+    notifications: config.notifications ?? "all",
   } as AppConfig;
 }
 
@@ -49,6 +50,13 @@ export function saveConfig(config: AppConfig, customDir?: string): void {
 
   const path = getConfigPath(customDir);
   writeFileSync(path, JSON.stringify(config, null, 2));
+}
+
+const NOTIFICATION_MODES: NotificationMode[] = ["all", "bell", "off"];
+
+// An unknown TG_NOTIFY value (e.g. "false") falls back to the saved setting
+function parseNotificationMode(value: string | undefined): NotificationMode | undefined {
+  return NOTIFICATION_MODES.find((mode) => mode === value);
 }
 
 export function loadConfigWithEnvOverrides(
@@ -76,6 +84,7 @@ export function loadConfigWithEnvOverrides(
     messageLayout:
       (process.env.TG_MESSAGE_LAYOUT as MessageLayout) ?? config.messageLayout,
     skin: (process.env.TG_SKIN as SkinName) ?? config.skin,
+    notifications: parseNotificationMode(process.env.TG_NOTIFY) ?? config.notifications,
     noColor:
       process.env.NO_COLOR != null && process.env.NO_COLOR !== ""
         ? true

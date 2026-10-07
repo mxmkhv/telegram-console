@@ -1,10 +1,11 @@
 import type { TelegramService, ConnectionState, Chat, Message, MediaAttachment } from "../types";
+import { createConnectionWatchdog } from "./connectionWatchdog";
 
 const MOCK_CHATS: Chat[] = [
   { id: "1", title: "Elon Musk", unreadCount: 47, isGroup: false },
   { id: "2", title: "Donald Trump", unreadCount: 3, isGroup: false },
   { id: "3", title: "Satoshi Nakamoto", unreadCount: 1, isGroup: false },
-  { id: "4", title: "Tech Bros Anonymous", unreadCount: 99, isGroup: true },
+  { id: "4", title: "Tech Bros Anonymous", unreadCount: 99, isGroup: true, isMuted: true },
   { id: "5", title: "Mark Zuckerberg", unreadCount: 0, isGroup: false },
   { id: "6", title: "Bill Gates", unreadCount: 2, isGroup: false },
   { id: "7", title: "Jeff Bezos", unreadCount: 0, isGroup: false },
@@ -120,16 +121,19 @@ const DRIP_MESSAGES = [
 
 // Operations the mock should reject. Read live, so tests can flip them mid-run.
 export interface MockFailures {
+  /** Drop the connection 8s after connecting and bring it back 12s later */
+  drop?: boolean;
   connect?: boolean;
   getMessages?: boolean;
   send?: boolean;
   edit?: boolean;
 }
 
-// TG_MOCK_FAIL=send,edit,connect,getMessages makes those calls fail in --mock mode
+// TG_MOCK_FAIL=send,edit,connect,getMessages,drop makes those calls fail in --mock mode
 export function mockFailuresFromEnv(value = process.env.TG_MOCK_FAIL): MockFailures {
   const names = new Set(value?.split(",").map((name) => name.trim()));
   return {
+    drop: names.has("drop"),
     connect: names.has("connect"),
     getMessages: names.has("getMessages"),
     send: names.has("send"),
@@ -145,7 +149,11 @@ export function createMockTelegramService(options?: {
   typingIntervalMs?: number;
   typingClearMs?: number;
   failures?: MockFailures;
-}): TelegramService & { simulateIncomingMessage(chatId: string, text: string): void } {
+}): TelegramService & {
+  simulateIncomingMessage(chatId: string, text: string): void;
+  simulateConnectionDrop(): void;
+  simulateConnectionRestore(libraryNotices?: boolean): void;
+} {
   const failures = options?.failures ?? {};
   const typingIntervalMs = options?.typingIntervalMs ?? 8000;
   const typingClearMs = options?.typingClearMs ?? 3000;
@@ -159,6 +167,19 @@ export function createMockTelegramService(options?: {
   let typingInterval: NodeJS.Timeout | null = null;
   let typingClearTimer: NodeJS.Timeout | null = null;
 
+  // The real service's watchdog, with a network that's down while `offline`
+  let offline = false;
+  let dropTimer: NodeJS.Timeout | null = null;
+  const watchdog = createConnectionWatchdog({
+    reconnect: async () => !offline,
+    onStateChange: (state) => {
+      connectionState = state;
+      connectionCallback?.(state);
+    },
+    graceMs: 3000,
+    retryMs: 3000,
+  });
+
   function deliverIncoming(chatId: string, senderId: string, senderName: string, text: string) {
     const message: Message = {
       id: Date.now(),
@@ -169,13 +190,25 @@ export function createMockTelegramService(options?: {
       isOutgoing: false,
     };
     (messages[chatId] ??= []).push(message);
-    messageCallbacks.forEach((cb) => cb(message, chatId));
+    // Like Telegram: what's sent while offline is only there when you ask for it
+    if (!offline) messageCallbacks.forEach((cb) => cb(message, chatId));
   }
 
   return {
     // Test hook: deliver a message from the other side right away
     simulateIncomingMessage(chatId: string, text: string) {
       deliverIncoming(chatId, chatId, MOCK_CHATS.find((c) => c.id === chatId)?.title ?? "Someone", text);
+    },
+
+    // Test hooks: the network goes away, and comes back
+    simulateConnectionDrop() {
+      offline = true;
+      watchdog.lost();
+    },
+    // By default the library notices; otherwise only the watchdog's next try does
+    simulateConnectionRestore(libraryNotices = true) {
+      offline = false;
+      if (libraryNotices) watchdog.restored();
     },
 
     async connect() {
@@ -190,9 +223,18 @@ export function createMockTelegramService(options?: {
       connectionState = "connected";
       connectionCallback?.(connectionState);
 
+      if (failures.drop) {
+        if (dropTimer) clearTimeout(dropTimer);
+        dropTimer = setTimeout(() => {
+          this.simulateConnectionDrop();
+          // GramJS has given up by then: the watchdog's retries bring it back
+          dropTimer = setTimeout(() => this.simulateConnectionRestore(false), 12_000);
+        }, 8000);
+      }
+
       // Start dripping messages every 5 seconds
       dripInterval = setInterval(() => {
-        if (messageCallbacks.size > 0) {
+        if (messageCallbacks.size > 0 && !offline) {
           const drip = DRIP_MESSAGES[dripIndex % DRIP_MESSAGES.length]!;
           deliverIncoming(drip.chatId, drip.senderId, drip.senderName, drip.text);
           dripIndex++;
@@ -213,6 +255,11 @@ export function createMockTelegramService(options?: {
     },
 
     async disconnect() {
+      watchdog.stop();
+      if (dropTimer) {
+        clearTimeout(dropTimer);
+        dropTimer = null;
+      }
       if (dripInterval) {
         clearInterval(dripInterval);
         dripInterval = null;
@@ -257,6 +304,7 @@ export function createMockTelegramService(options?: {
     async sendMessage(chatId: string, text: string, replyToMsgId?: number, replyToSenderName?: string) {
       await new Promise((r) => setTimeout(r, 50));
       failIf(failures.send, "Mock: CHAT_WRITE_FORBIDDEN");
+      failIf(offline, "Mock: not connected");
       const message: Message = {
         id: Date.now(),
         senderId: "me",

@@ -1,4 +1,4 @@
-import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
+import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode } from "../types";
 import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
@@ -25,6 +25,7 @@ export interface AppState {
   messageLayout: MessageLayout;
   uiMode: UiMode;
   skin: SkinName;
+  notifications: NotificationMode;
   replyingToMessage: Message | null;
   editingMessage: Message | null;
   isHidden: boolean;
@@ -45,6 +46,7 @@ export type AppAction =
   | { type: "SET_CHATS"; payload: Chat[] }
   | { type: "SELECT_CHAT"; payload: string }
   | { type: "SET_MESSAGES"; payload: { chatId: string; messages: Message[] } }
+  | { type: "MERGE_MESSAGES"; payload: { chatId: string; messages: Message[]; pageFull: boolean } }
   | { type: "ADD_MESSAGE"; payload: { chatId: string; message: Message } }
   | { type: "PREPEND_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "SET_FOCUSED_PANEL"; payload: AppState["focusedPanel"] }
@@ -64,6 +66,7 @@ export type AppAction =
   | { type: "SET_MEDIA_ERROR"; payload: string }
   // Inline preview actions
   | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout }
+  | { type: "SET_NOTIFICATIONS"; payload: NotificationMode }
   | { type: "SET_UI_MODE"; payload: UiMode }
   | { type: "SET_SKIN"; payload: SkinName }
   | { type: "SET_HIDDEN"; payload: boolean }
@@ -109,6 +112,7 @@ export const initialState: AppState = {
   messageLayout: "classic",
   uiMode: "full",
   skin: "default",
+  notifications: "all",
   replyingToMessage: null,
   editingMessage: null,
   isHidden: false,
@@ -239,6 +243,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case "MERGE_MESSAGES": {
+      // The newest page after a reconnect: add what was missed by id, keeping
+      // older pages already scrolled through. A full page whose oldest message
+      // isn't known may have left a gap behind it, so it replaces the list.
+      const { chatId, messages: page, pageFull } = action.payload;
+      const existing = state.messages[chatId] ?? [];
+      const known = new Set(existing.map((m) => m.id));
+      if (existing.length === 0 || (pageFull && page[0] && !known.has(page[0].id))) {
+        return appReducer(state, { type: "SET_MESSAGES", payload: { chatId, messages: page } });
+      }
+      const fetched = new Map(page.map((m) => [m.id, m]));
+      // Fresh copies win, except while your own send or edit is in flight
+      const current = existing.map((m) => (m.delivery ? m : (fetched.get(m.id) ?? m)));
+      const confirmed = [...current.filter((m) => m.id > 0), ...page.filter((m) => !known.has(m.id))].sort(
+        (a, b) => a.id - b.id,
+      );
+      const merged = [...confirmed, ...current.filter((m) => m.id < 0)];
+      const newest = confirmed.at(-1);
+      return {
+        ...state,
+        chats: newest
+          ? withLastMessage(state.chats, chatId, (last) => (last.id > 0 && newest.id > last.id ? newest : last))
+          : state.chats,
+        senderColors: withSenderColors(state.senderColors, chatId, merged),
+        messages: { ...state.messages, [chatId]: merged },
+      };
+    }
+
     case "ADD_MESSAGE": {
       const { chatId, message } = action.payload;
       const existingMessages = state.messages[chatId] ?? [];
@@ -254,7 +286,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const updatedChat = {
           ...chat,
           lastMessage: message,
-          unreadCount: state.selectedChatId === chatId ? chat.unreadCount : chat.unreadCount + 1,
+          // Your own messages, sent from another device, aren't unread
+          unreadCount: state.selectedChatId === chatId || message.isOutgoing ? chat.unreadCount : chat.unreadCount + 1,
         };
         // Move chat to top of list
         updatedChats = [
@@ -404,6 +437,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     case "SET_MESSAGE_LAYOUT":
       return { ...state, messageLayout: action.payload };
+
+    case "SET_NOTIFICATIONS":
+      return { ...state, notifications: action.payload };
 
     case "SET_UI_MODE":
       return { ...state, uiMode: action.payload };

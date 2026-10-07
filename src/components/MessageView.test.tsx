@@ -740,7 +740,8 @@ describe("MessageView tall messages", () => {
     isOutgoing: false,
   });
   const tall = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
-  const tick = () => new Promise((r) => setTimeout(r, 30));
+  // Generous: a slow, busy machine still renders between key presses
+  const tick = () => new Promise((r) => setTimeout(r, 60));
 
   // height 12 leaves 8 message rows: one for "↑ earlier", one for what's left below
   function Harness({

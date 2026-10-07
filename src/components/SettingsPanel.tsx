@@ -2,15 +2,23 @@ import React, { memo, useState, useCallback } from "react";
 import { useInput, Box as InkBox, Text as InkText } from "ink";
 import { Box, Text, useSkin } from "./ui";
 import { useApp } from "../state/context";
-import type { MessageLayout } from "../types";
+import type { MessageLayout, NotificationMode } from "../types";
 import { loadConfig, saveConfig } from "../config";
 import { SKIN_NAMES, getSkin } from "../config/skins";
+import { detectDesktopNotify } from "../services/terminalNotify";
 
 const LAYOUT_OPTIONS: MessageLayout[] = ["classic", "bubble"];
 
+const NOTIFICATION_OPTIONS: { mode: NotificationMode; label: string; detail: string }[] = [
+  { mode: "all", label: "Bell and desktop notification", detail: "Who wrote, and the start of the message" },
+  { mode: "bell", label: "Bell only", detail: "No message text leaves the terminal" },
+  { mode: "off", label: "Off", detail: "The window title still counts unread" },
+];
+
 const TABS = [
-  { key: "layout", label: "Message Layout" },
+  { key: "layout", label: "Layout" },
   { key: "skin", label: "Skin" },
+  { key: "notifications", label: "Notifications" },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
 
@@ -24,6 +32,11 @@ function SettingsPanelInner() {
   const [skinIndex, setSkinIndex] = useState(
     Math.max(0, SKIN_NAMES.indexOf(state.skin)),
   );
+  const [notifyIndex, setNotifyIndex] = useState(
+    Math.max(0, NOTIFICATION_OPTIONS.findIndex((o) => o.mode === state.notifications)),
+  );
+  const optionCount = { layout: LAYOUT_OPTIONS.length, skin: SKIN_NAMES.length, notifications: NOTIFICATION_OPTIONS.length };
+  const setIndex = { layout: setLayoutIndex, skin: setSkinIndex, notifications: setNotifyIndex }[activeTab];
 
   const handleSelect = useCallback(() => {
     if (activeTab === "layout") {
@@ -33,30 +46,33 @@ function SettingsPanelInner() {
       if (config) {
         saveConfig({ ...config, messageLayout: newLayout });
       }
-    } else {
+    } else if (activeTab === "skin") {
       const newSkin = SKIN_NAMES[skinIndex]!;
       dispatch({ type: "SET_SKIN", payload: newSkin });
       const config = loadConfig();
       if (config) {
         saveConfig({ ...config, skin: newSkin });
       }
+    } else {
+      const { mode } = NOTIFICATION_OPTIONS[notifyIndex]!;
+      dispatch({ type: "SET_NOTIFICATIONS", payload: mode });
+      const config = loadConfig();
+      if (config) {
+        saveConfig({ ...config, notifications: mode });
+      }
     }
-  }, [activeTab, layoutIndex, skinIndex, dispatch]);
+  }, [activeTab, layoutIndex, skinIndex, notifyIndex, dispatch]);
 
   useInput((input, key) => {
     if (key.escape) {
       dispatch({ type: "SET_CURRENT_VIEW", payload: "chat" });
     } else if (key.leftArrow || key.rightArrow || key.tab) {
-      setActiveTab((t) => (t === "layout" ? "skin" : "layout"));
+      const step = key.leftArrow || (key.tab && key.shift) ? -1 : 1;
+      setActiveTab((t) => TABS[(TABS.findIndex((tab) => tab.key === t) + step + TABS.length) % TABS.length]!.key);
     } else if (key.upArrow) {
-      if (activeTab === "layout") setLayoutIndex((i) => Math.max(0, i - 1));
-      else setSkinIndex((i) => Math.max(0, i - 1));
+      setIndex((i) => Math.max(0, i - 1));
     } else if (key.downArrow) {
-      if (activeTab === "layout") {
-        setLayoutIndex((i) => Math.min(LAYOUT_OPTIONS.length - 1, i + 1));
-      } else {
-        setSkinIndex((i) => Math.min(SKIN_NAMES.length - 1, i + 1));
-      }
+      setIndex((i) => Math.min(optionCount[activeTab] - 1, i + 1));
     } else if (key.return) {
       handleSelect();
     }
@@ -128,6 +144,33 @@ function SettingsPanelInner() {
             <Text>Hello! <Text dimColor>[14:32]</Text></Text>
             <Text>                    <Text color="blue">Hi there</Text> <Text dimColor>[14:33]</Text></Text>
           </Box>
+        </>
+      ) : activeTab === "notifications" ? (
+        <>
+          {NOTIFICATION_OPTIONS.map((option, i) => {
+            const isSelected = notifyIndex === i;
+            return (
+              <React.Fragment key={option.mode}>
+                <Box flexDirection="row" marginTop={i === 0 ? 0 : 1}>
+                  <Text color={isSelected ? "cyan" : undefined}>
+                    {isSelected ? `${skin.glyphs.caret} ` : "  "}
+                  </Text>
+                  <Text bold color={isSelected ? "cyan" : undefined}>
+                    {option.label}
+                  </Text>
+                  {state.notifications === option.mode && <Text dimColor> (current)</Text>}
+                </Box>
+                <Box marginLeft={4}>
+                  <Text dimColor>{option.detail}</Text>
+                </Box>
+              </React.Fragment>
+            );
+          })}
+          <Text> </Text>
+          <Text dimColor>Muted chats and the open chat never alert.</Text>
+          {!detectDesktopNotify(process.env) && (
+            <Text dimColor>No desktop notifications in this terminal.</Text>
+          )}
         </>
       ) : (
         <>

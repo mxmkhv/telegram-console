@@ -30,6 +30,7 @@ describe("Config", () => {
       uiMode: "full" as const,
       noColor: false,
       skin: "default" as const,
+      notifications: "all" as const,
     };
 
     saveConfig(config, TEST_CONFIG_DIR);
@@ -75,6 +76,7 @@ describe("Environment Overrides", () => {
       uiMode: "full" as const,
       noColor: false,
       skin: "default" as const,
+      notifications: "all" as const,
     };
     saveConfig(config, TEST_CONFIG_DIR);
 
@@ -170,6 +172,38 @@ describe("config skin", () => {
     const dir = tmpConfigDir("default");
     process.env.TG_SKIN = "claudeCode";
     expect(loadConfigWithEnvOverrides(dir)!.skin).toBe("claudeCode");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("config notifications", () => {
+  const prev = process.env.TG_NOTIFY;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.TG_NOTIFY;
+    else process.env.TG_NOTIFY = prev;
+  });
+
+  function tmpConfigDir(notifications?: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "tgc-cfg-notify-"));
+    const cfg: Record<string, unknown> = { apiId: 1, apiHash: "h" };
+    if (notifications !== undefined) cfg.notifications = notifications;
+    writeFileSync(join(dir, "config.json"), JSON.stringify(cfg));
+    return dir;
+  }
+
+  it("defaults to bell and desktop notifications", () => {
+    const dir = tmpConfigDir();
+    delete process.env.TG_NOTIFY;
+    expect(loadConfigWithEnvOverrides(dir)!.notifications).toBe("all");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("takes TG_NOTIFY over the saved mode, but ignores values it doesn't know", () => {
+    const dir = tmpConfigDir("bell");
+    process.env.TG_NOTIFY = "off";
+    expect(loadConfigWithEnvOverrides(dir)!.notifications).toBe("off");
+    process.env.TG_NOTIFY = "false";
+    expect(loadConfigWithEnvOverrides(dir)!.notifications).toBe("bell");
     rmSync(dir, { recursive: true, force: true });
   });
 });

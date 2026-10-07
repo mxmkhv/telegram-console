@@ -105,8 +105,9 @@ TG_SESSION_MODE   # "persistent" | "ephemeral"
 TG_AUTH_METHOD    # "qr" | "phone"
 TG_MESSAGE_LAYOUT # "classic" | "bubble"
 TG_SKIN           # "default" | "claudeCode"
+TG_NOTIFY         # "all" | "bell" | "off" (new messages in other, unmuted chats)
 TG_LOG_LEVEL      # "quiet" | "info" | "verbose"
-TG_MOCK_FAIL      # --mock only: comma list of send,edit,connect,getMessages to fail
+TG_MOCK_FAIL      # --mock only: comma list of send,edit,connect,getMessages,drop to fail
 ```
 
 Config stored at `~/.config/telegram-console/config.json`

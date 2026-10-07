@@ -77,6 +77,17 @@ describe("appReducer", () => {
     expect(chat2?.unreadCount).toBe(0);
   });
 
+  it("ADD_MESSAGE doesn't count your own message from another device as unread", () => {
+    const state = appReducer(
+      appReducer(initialState, { type: "SET_CHATS", payload: [{ id: "1", title: "Chat One", unreadCount: 2, isGroup: false }] }),
+      {
+        type: "ADD_MESSAGE",
+        payload: { chatId: "1", message: { id: 5, senderId: "me", senderName: "You", text: "from my phone", timestamp: new Date(), isOutgoing: true } },
+      },
+    );
+    expect(state.chats[0]?.unreadCount).toBe(2);
+  });
+
   it("ADD_MESSAGE does NOT increment unreadCount for selected chat", () => {
     const stateWithChats = appReducer(initialState, {
       type: "SET_CHATS",
@@ -591,5 +602,41 @@ describe("chat list preview", () => {
       payload: { chatId: "1", messageId: 8, newText: "earlier!", delivery: undefined },
     });
     expect(other.chats).toBe(start.chats);
+  });
+});
+
+describe("MERGE_MESSAGES", () => {
+  const msg = (id: number, text = `m${id}`): Message => ({ id, senderId: "u", senderName: "A", text, timestamp: new Date(), isOutgoing: false });
+  const withMessages = (messages: Message[]) =>
+    appReducer(
+      appReducer(initialState, { type: "SET_CHATS", payload: [{ id: "c", title: "C", unreadCount: 0, isGroup: false }] }),
+      { type: "SET_MESSAGES", payload: { chatId: "c", messages } },
+    );
+
+  it("adds what was missed by id, keeping older pages and live arrivals", () => {
+    // 1-3 scrolled back through, 4 known, 5-6 missed, 9 arrived live meanwhile
+    const state = appReducer(withMessages([msg(1), msg(2), msg(3), msg(4), msg(9)]), {
+      type: "MERGE_MESSAGES",
+      payload: { chatId: "c", messages: [msg(4), msg(5), msg(6)], pageFull: true },
+    });
+    expect(state.messages.c!.map((m) => m.id)).toEqual([1, 2, 3, 4, 5, 6, 9]);
+  });
+
+  it("starts from the page when a full page may have skipped messages behind it", () => {
+    const state = appReducer(withMessages([msg(1), msg(2)]), {
+      type: "MERGE_MESSAGES",
+      payload: { chatId: "c", messages: [msg(60), msg(61)], pageFull: true },
+    });
+    expect(state.messages.c!.map((m) => m.id)).toEqual([60, 61]);
+  });
+
+  it("takes fresh copies, but keeps a send or edit still in flight", () => {
+    const pending: Message = { ...msg(-1, "sending"), isOutgoing: true, delivery: { action: "send", status: "pending" } };
+    const editing: Message = { ...msg(2, "my edit"), delivery: { action: "edit", status: "pending", originalText: "m2" } };
+    const state = appReducer(withMessages([msg(1), editing, pending]), {
+      type: "MERGE_MESSAGES",
+      payload: { chatId: "c", messages: [msg(1, "edited elsewhere"), msg(2), msg(3)], pageFull: false },
+    });
+    expect(state.messages.c!.map((m) => m.text)).toEqual(["edited elsewhere", "my edit", "m3", "sending"]);
   });
 });

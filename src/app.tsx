@@ -30,9 +30,11 @@ import { withTimeout } from "./utils/withTimeout";
 const DELIVERY_TIMEOUT_MS = 30_000;
 // A stalled load turns into the error state, which Ctrl+R can retry
 const LOAD_TIMEOUT_MS = 30_000;
+const MESSAGE_PAGE_SIZE = 50;
 const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
 import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
+import { useTerminalNotifications } from "./hooks/useTerminalNotifications";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
@@ -42,10 +44,24 @@ interface MainAppProps {
   telegramService: TelegramService;
   onLogout: (mode: LogoutMode) => void;
   onToggleNoColor: () => void;
+  /** Writes the bell, window title and notification escapes; tests leave it out */
+  writeToTerminal?: (data: string) => void;
 }
 
-export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppProps) {
+export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTerminal }: MainAppProps) {
   const { state, dispatch } = useApp();
+
+  // The open chat is on screen unless something covers its messages
+  const messagesCovered =
+    state.currentView !== "chat" || state.mediaPanel.isOpen || state.showChatSwitcher || state.showHelp || state.showLogoutPrompt;
+  const { newWhileHidden } = useTerminalNotifications({
+    write: writeToTerminal,
+    telegramService,
+    chats: state.chats,
+    viewingChatId: messagesCovered ? null : state.selectedChatId,
+    hidden: state.isHidden,
+    mode: state.notifications,
+  });
   const { exit } = useInkApp();
   // Track highlighted chat by ID (not index) so it follows when chats reorder
   const [highlightedChatId, setHighlightedChatId] = useState<string | null>(null);
@@ -231,16 +247,57 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         : "ready";
   const chatsStatus: LoadStatus = initFailed ? "error" : chatsLoaded ? "ready" : "loading";
 
+
+  // Messages sent while the connection was down never arrive as updates, so
+  // reload the chat list and the open chat once it's back. Ctrl+R retries.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshAfterReconnect = useCallback(() => {
+    setRefreshFailed(false);
+    const failed = (what: string) => (err: unknown) => {
+      setRefreshFailed(true);
+      showError(`Reconnected, but couldn't refresh ${what}: press Ctrl+R to retry (${describeError(err)})`, true);
+    };
+    telegramService.getChats().then((chats) => {
+      // The open chat was read here, whatever the server counted meanwhile
+      const openChatId = stateRef.current.selectedChatId;
+      dispatch({ type: "SET_CHATS", payload: chats.map((c) => (c.id === openChatId ? { ...c, unreadCount: 0 } : c)) });
+    }, failed("your chats"));
+
+    // The reducer merges by id against the list as it is then, so live
+    // messages that land meanwhile can't hide the missed ones
+    const chatId = stateRef.current.selectedChatId;
+    if (!chatId) return;
+    telegramService.getMessages(chatId, MESSAGE_PAGE_SIZE).then((page) => {
+      dispatch({ type: "MERGE_MESSAGES", payload: { chatId, messages: page, pageFull: page.length >= MESSAGE_PAGE_SIZE } });
+    }, failed("this chat"));
+  }, [telegramService, dispatch, showError]);
+
+  const connectionDropped = useRef(false);
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    if (state.connectionState !== "connected") {
+      connectionDropped.current = true;
+      return;
+    }
+    if (!connectionDropped.current) return;
+    connectionDropped.current = false;
+    refreshAfterReconnect();
+  }, [state.connectionState, chatsLoaded, refreshAfterReconnect]);
+
   // Ctrl+R retries whatever failed to load
-  const canRetry = initFailed || messagesStatus === "error";
+  const canRetry = initFailed || refreshFailed || messagesStatus === "error";
   const retry = useCallback(() => {
     if (initFailed) {
       retryInit();
       return;
     }
     dispatch({ type: "CLEAR_NOTICE" });
+    if (refreshFailed) {
+      refreshAfterReconnect();
+      return;
+    }
     setLoadAttempt((n) => n + 1);
-  }, [initFailed, retryInit, dispatch]);
+  }, [initFailed, refreshFailed, retryInit, refreshAfterReconnect, dispatch]);
 
   // Focus media panel when it opens
   useEffect(() => {
@@ -730,7 +787,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   }, [state.mediaPanel.isOpen, state.mediaPanel.messageId, currentMessages]);
 
   if (state.isHidden) {
-    return <BlankScreen />;
+    return <BlankScreen newMessages={newWhileHidden} height={terminalRows} />;
   }
 
   // Media popup: full-screen takeover. Replaces the entire UI with the photo
@@ -881,9 +938,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 interface AppProps {
   useMock?: boolean;
   incognito?: boolean;
+  /** Writes the bell, window title and notification escapes; tests leave it out */
+  writeToTerminal?: (data: string) => void;
 }
 
-export function App({ useMock = false, incognito = false }: AppProps) {
+export function App({ useMock = false, incognito = false, writeToTerminal }: AppProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [telegramService, setTelegramService] = useState<TelegramService | null>(null);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
@@ -977,11 +1036,17 @@ export function App({ useMock = false, incognito = false }: AppProps) {
   } else {
     tree = (
       <ErrorBoundary>
-        <AppProvider telegramService={telegramService} initialUiMode={config?.uiMode} initialSkin={config?.skin}>
+        <AppProvider
+          telegramService={telegramService}
+          initialUiMode={config?.uiMode}
+          initialSkin={config?.skin}
+          initialNotifications={config?.notifications}
+        >
           <MainApp
             telegramService={telegramService}
             onLogout={handleLogout}
             onToggleNoColor={handleToggleNoColor}
+            writeToTerminal={writeToTerminal}
           />
         </AppProvider>
       </ErrorBoundary>
