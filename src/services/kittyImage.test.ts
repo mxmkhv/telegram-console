@@ -1,6 +1,6 @@
 import { afterEach, describe, it, expect } from "bun:test";
 import { Jimp } from "jimp";
-import { clearKittyImage, LOGO_IMAGE_ID, MEDIA_IMAGE_ID, placeholderGridWindow, supportsKittyGraphics, tintAlphaMask } from "./kittyImage.js";
+import { clearKittyImage, LOGO_IMAGE_ID, MEDIA_IMAGE_ID, placeholderGridWindow, supportsKittyGraphics, tintAlphaMask, transmitAndPlace } from "./kittyImage.js";
 import { DIACRITICS } from "./kittyDiacritics.js";
 
 const PLACEHOLDER = "\u{10EEEE}";
@@ -22,6 +22,31 @@ function decodeCells(gridLine: string): Array<{ row: number; col: number }> {
 }
 
 describe("placeholderGridWindow", () => {
+  it("references the uploaded image in iTerm, including the image ID's high byte", () => {
+    // iTerm 3.7.2 starts imageMSB at -1. If the third diacritic is omitted,
+    // its decoder shifts -1 into the high byte, looking up 0xff000001 for ID 1.
+    // https://github.com/gnachman/iTerm2/blob/v3.7.2/sources/Drawing/iTermTextDrawingHelper.m#L2889
+    for (const imageId of [MEDIA_IMAGE_ID, LOGO_IMAGE_ID, 255, 256, 0xffffff, 0x01000001, 0xffffffff]) {
+      const control = transmitAndPlace(Buffer.from("test"), 2, 2, imageId);
+      const uploadedId = Number(control.match(/_Gi=(\d+),/)![1]);
+      const grid = placeholderGridWindow(4, 4, 1, 1, 2, 2, imageId);
+      for (const line of grid.split("\n")) {
+        const indexed = line.slice(1).match(/^\[38;5;(\d+)m/);
+        const rgb = line.slice(1).match(/^\[38;2;(\d+);(\d+);(\d+)m/);
+        const lowBytes = indexed
+          ? Number(indexed[1])
+          : (Number(rgb![1]) << 16) | (Number(rgb![2]) << 8) | Number(rgb![3]);
+        const chars = Array.from(line);
+        for (let i = 0; i < chars.length; i++) {
+          if (chars[i] !== PLACEHOLDER) continue;
+          const imageMSB = DIACRITICS.indexOf(chars[i + 3]!.codePointAt(0)!);
+          const decodedId = ((imageMSB << 24) | lowBytes) >>> 0;
+          expect(decodedId).toBe(uploadedId);
+        }
+      }
+    }
+  });
+
   it("produces winH lines of winW cells", () => {
     const grid = placeholderGridWindow(10, 10, 0, 0, 4, 3);
     const lines = grid.split("\n");
