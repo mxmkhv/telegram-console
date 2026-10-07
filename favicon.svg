@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="5.5 -4.5 35 35" width="64" height="64">
+  <!-- telegram-console mark from logo.svg, centered in a square for favicon use -->
+  <g stroke="#2AABEE" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" fill="none">
+    <polygon points="26,13 7,3.5 13.5,13 7,22.5"/>
+    <line x1="26" y1="13" x2="13.5" y2="13" opacity="0.55"/>
+  </g>
+  <rect x="31" y="19.5" width="8" height="3" rx="0.6" fill="#2AABEE" opacity="0.55"/>
+</svg>
