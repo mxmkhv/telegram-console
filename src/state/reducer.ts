@@ -1,4 +1,4 @@
-import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode } from "../types";
+import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode, ReportedReaction } from "../types";
 import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
@@ -82,6 +82,11 @@ export type AppAction =
   // `text` is the text the result belongs to; results for an older edit are ignored
   | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; text: string; delivery: Delivery | undefined } }
   | { type: "DISCARD_UNSENT"; payload: { chatId: string; messageId: number } }
+  // Changes made elsewhere: by others, or by you on another device
+  | { type: "MESSAGE_EDITED"; payload: { chatId: string; message: Message; reactions: ReportedReaction[] | undefined } }
+  // Without a chatId: any private chat or small group (see TelegramService.onMessagesDeleted)
+  | { type: "MESSAGES_DELETED"; payload: { chatId: string | undefined; messageIds: number[] } }
+  | { type: "SET_REACTIONS"; payload: { chatId: string; messageId: number; reactions: ReportedReaction[] } }
   | { type: "SET_REACTION_OVERLAY"; payload: ReactionOverlay }
   | { type: "SET_SHOW_CHAT_SWITCHER"; payload: boolean }
   | { type: "SET_SHOW_HELP"; payload: boolean }
@@ -137,6 +142,17 @@ export function isOverlayOpen(state: AppState): boolean {
   );
 }
 
+// Reported counts, keeping which are yours where the report leaves that out
+function mergeReactions(
+  current: Message["reactions"],
+  reported: ReportedReaction[] | undefined,
+): Message["reactions"] {
+  return reported?.map((r) => ({
+    ...r,
+    hasUserReacted: r.hasUserReacted ?? current?.find((mine) => mine.emoji === r.emoji)?.hasUserReacted ?? false,
+  }));
+}
+
 function withSenderColors(
   senderColors: Record<string, SenderColors>,
   chatId: string,
@@ -156,11 +172,12 @@ function mapMessage(
   update: (msg: Message) => Message,
 ): AppState {
   const messages = state.messages[chatId];
-  if (!messages) return state;
+  // The chat list previews the last message, so keep it in step, opened or not
+  const chats = withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? update(last) : last));
+  if (!messages) return chats === state.chats ? state : { ...state, chats };
   return {
     ...state,
-    // The chat list previews the last message, so keep it in step
-    chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? update(last) : last)),
+    chats,
     messages: {
       ...state.messages,
       [chatId]: messages.map((msg) => (msg.id === messageId ? update(msg) : msg)),
@@ -572,6 +589,80 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? remaining.at(-1) : last)),
         messages: { ...state.messages, [chatId]: remaining },
       };
+    }
+
+    case "MESSAGE_EDITED": {
+      const { chatId, message, reactions } = action.payload;
+      return mapMessage(state, chatId, message.id, (msg) =>
+        // Your own edit from here is still in flight: its result decides
+        msg.delivery
+          ? msg
+          : {
+              ...msg,
+              text: message.text,
+              media: message.media,
+              reactions: mergeReactions(msg.reactions, reactions),
+              replyToMsgId: message.replyToMsgId,
+              forwardedFrom: message.forwardedFrom,
+            },
+      );
+    }
+
+    case "MESSAGES_DELETED": {
+      const { chatId, messageIds } = action.payload;
+      const deleted = new Set(messageIds);
+      // Without a chat, it's any private chat or small group: their ids don't repeat
+      const sharingIds = new Set(state.chats.filter((chat) => !chat.isChannel).map((chat) => chat.id));
+      const inChat = (id: string) => (chatId === undefined ? sharingIds.has(id) : id === chatId);
+      let messages = state.messages;
+      for (const [id, list] of Object.entries(state.messages)) {
+        if (!inChat(id) || !list.some((m) => deleted.has(m.id))) continue;
+        messages = { ...messages, [id]: list.filter((m) => !deleted.has(m.id)) };
+      }
+      const chats = state.chats.map((chat) =>
+        inChat(chat.id) && chat.lastMessage && deleted.has(chat.lastMessage.id)
+          ? // What came before it, if it's loaded
+            { ...chat, lastMessage: messages[chat.id]?.at(-1) }
+          : chat,
+      );
+      // Nothing left to react to, view or reply to
+      const goneHere = (id: number | null | undefined) =>
+        id != null && deleted.has(id) && !!state.selectedChatId && inChat(state.selectedChatId);
+      const mediaGone = state.mediaPanel.isOpen && goneHere(state.mediaPanel.messageId);
+      const replyGone = goneHere(state.replyingToMessage?.id);
+      const editGone = goneHere(state.editingMessage?.id);
+      // Other chats' drafts let go of it too
+      let drafts = state.drafts;
+      for (const [id, draft] of Object.entries(state.drafts)) {
+        const replyTo = draft.replyTo && deleted.has(draft.replyTo.id) ? null : draft.replyTo;
+        const editing = draft.editing && deleted.has(draft.editing.id) ? null : draft.editing;
+        if (!inChat(id) || (replyTo === draft.replyTo && editing === draft.editing)) continue;
+        drafts = { ...drafts, [id]: { ...draft, replyTo, editing } };
+      }
+      const next: AppState = {
+        ...state,
+        messages,
+        chats,
+        drafts,
+        reactionOverlay: goneHere(state.reactionOverlay?.messageId) ? null : state.reactionOverlay,
+        mediaPanel: mediaGone ? initialState.mediaPanel : state.mediaPanel,
+        focusedPanel: mediaGone ? "messages" : state.focusedPanel,
+        replyingToMessage: replyGone ? null : state.replyingToMessage,
+        editingMessage: editGone ? null : state.editingMessage,
+      };
+      // Say why it closed, unless that would hide an error still waiting on you
+      if ((!mediaGone && !replyGone && !editGone) || state.notice?.sticky) return next;
+      const text = mediaGone
+        ? "That message was deleted"
+        : editGone
+          ? "The message you were editing was deleted"
+          : "The message you were replying to was deleted";
+      return appReducer(next, { type: "SHOW_NOTICE", payload: { kind: "info", text } });
+    }
+
+    case "SET_REACTIONS": {
+      const { chatId, messageId, reactions } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => ({ ...msg, reactions: mergeReactions(msg.reactions, reactions) }));
     }
 
     case "SET_REACTION_OVERLAY":

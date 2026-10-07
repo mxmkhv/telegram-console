@@ -1,93 +1,14 @@
 import { TelegramClient, Api, utils } from "telegram";
 import { StringSession } from "telegram/sessions";
 import { NewMessage, NewMessageEvent, Raw } from "telegram/events";
+import { EditedMessage, type EditedMessageEvent } from "telegram/events/EditedMessage";
+import { DeletedMessage, type DeletedMessageEvent } from "telegram/events/DeletedMessage";
 import { UpdateConnectionState } from "telegram/network";
 import { createConnectionWatchdog, readConnectionReport } from "./connectionWatchdog";
-import type { TelegramService, ConnectionState, Message, MediaAttachment } from "../types";
-
-// Type for sender objects from GramJS (User, Chat, or Channel)
-interface GramJSSender {
-  firstName?: string;
-  lastName?: string;
-  title?: string;
-  username?: string;
-}
-
-function formatSenderName(sender: GramJSSender | undefined): string {
-  if (!sender) return "Unknown";
-  if (sender.firstName) {
-    return `${sender.firstName}${sender.lastName ? ` ${sender.lastName}` : ""}`;
-  }
-  return sender.title ?? sender.username ?? "Unknown";
-}
-
-function extractMedia(msg: Api.Message): MediaAttachment | undefined {
-  const { media } = msg;
-  if (!media) return undefined;
-
-  // Photo
-  if (media.className === 'MessageMediaPhoto' && (media as Api.MessageMediaPhoto).photo) {
-    const photo = (media as Api.MessageMediaPhoto).photo as Api.Photo;
-    const largest = photo.sizes?.slice(-1)[0] as { size?: number; w?: number; h?: number } | undefined;
-    return {
-      type: 'photo',
-      fileSize: largest?.size,
-      width: largest?.w,
-      height: largest?.h,
-      mimeType: 'image/jpeg',
-      _message: msg,
-    };
-  }
-
-  // Document (stickers, GIFs, files)
-  if (media.className === 'MessageMediaDocument' && (media as Api.MessageMediaDocument).document) {
-    const doc = (media as Api.MessageMediaDocument).document as Api.Document;
-    const attrs = doc.attributes || [];
-
-    // Check for sticker
-    const stickerAttr = attrs.find(a => a.className === 'DocumentAttributeSticker');
-    if (stickerAttr) {
-      const isAnimated = doc.mimeType === 'application/x-tgsticker'
-                      || doc.mimeType === 'video/webm';
-      return {
-        type: 'sticker',
-        fileSize: Number(doc.size),
-        emoji: (stickerAttr as Api.DocumentAttributeSticker).alt,
-        isAnimated,
-        mimeType: doc.mimeType,
-        _message: msg,
-      };
-    }
-
-    // Check for voice message
-    const audioAttr = attrs.find(a => a.className === 'DocumentAttributeAudio') as Api.DocumentAttributeAudio | undefined;
-    if (audioAttr?.voice) {
-      return {
-        type: 'voice',
-        fileSize: Number(doc.size),
-        duration: audioAttr.duration,
-        mimeType: doc.mimeType,
-        _message: msg,
-      };
-    }
-
-    // Check for GIF/animation
-    const isAnimated = attrs.some(a => a.className === 'DocumentAttributeAnimated');
-    if (isAnimated || doc.mimeType === 'video/mp4') {
-      const videoAttr = attrs.find(a => a.className === 'DocumentAttributeVideo') as Api.DocumentAttributeVideo | undefined;
-      return {
-        type: 'gif',
-        fileSize: Number(doc.size),
-        width: videoAttr?.w,
-        height: videoAttr?.h,
-        mimeType: doc.mimeType,
-        _message: msg,
-      };
-    }
-  }
-
-  return undefined;
-}
+import { extractMedia, extractReactions, previewFrame, toMessage, type GramJSSender } from "./telegramMessage";
+import { createListeners } from "../utils/listeners";
+import { needsPreviewFrame } from "../utils/media";
+import type { TelegramService, ConnectionState, Message, ReportedReaction } from "../types";
 
 // Muted until a time still ahead (forever is a far-off date). A chat that
 // follows the account's default for its type isn't marked, even if that mutes it.
@@ -95,61 +16,6 @@ function isMuted(dialog: Api.TypeDialog | undefined): boolean {
   if (!(dialog instanceof Api.Dialog)) return false;
   const muteUntil = dialog.notifySettings.muteUntil;
   return muteUntil !== undefined && muteUntil * 1000 > Date.now();
-}
-
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function extractMessageText(m: Api.Message): string {
-  // Service messages (phone calls, etc.) have an action but no text
-  const action = (m as unknown as { action?: { className?: string; duration?: number; reason?: { className?: string }; video?: boolean } }).action;
-  if (action?.className === "MessageActionPhoneCall") {
-    const callType = action.video ? "video call" : "call";
-    if (action.reason?.className === "PhoneCallDiscardReasonMissed") {
-      return `Missed ${callType}`;
-    }
-    if (action.reason?.className === "PhoneCallDiscardReasonBusy") {
-      return `Declined ${callType}`;
-    }
-    if (action.duration) {
-      const mins = Math.floor(action.duration / 60);
-      const secs = action.duration % 60;
-      const dur = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-      return `${capitalize(callType)} (${dur})`;
-    }
-    return capitalize(callType);
-  }
-  return m.message ?? m.text ?? "";
-}
-
-function extractReactions(msg: Api.Message): Message["reactions"] {
-  const reactions = msg.reactions;
-  if (!reactions?.results) return undefined;
-
-  return reactions.results
-    .filter((r): r is Api.ReactionCount & { reaction: Api.ReactionEmoji } =>
-      r.reaction?.className === "ReactionEmoji"
-    )
-    .map((r) => ({
-      emoji: r.reaction.emoticon,
-      count: r.count,
-      // chosenOrder is null when user hasn't reacted, number when they have
-      hasUserReacted: r.chosenOrder != null,
-    }));
-}
-
-function toMessage(m: Api.Message, sender: GramJSSender | undefined): Message {
-  return {
-    id: m.id,
-    senderId: m.senderId?.toString() ?? "",
-    senderName: formatSenderName(sender),
-    text: extractMessageText(m),
-    timestamp: new Date(m.date * 1000),
-    isOutgoing: m.out ?? false,
-    media: extractMedia(m),
-    reactions: extractReactions(m),
-  };
 }
 
 const TYPING_TIMEOUT_MS = 6000;
@@ -185,6 +51,9 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
   let eventHandlerAdded = false;
   const _typingCallbacks = new Set<(chatId: string, isTyping: boolean) => void>();
   const _typingTimers = new Map<string, NodeJS.Timeout>();
+  const edits = createListeners<[Message, string, ReportedReaction[] | undefined]>();
+  const deletions = createListeners<[number[], string | undefined]>();
+  const reactionChanges = createListeners<[string, number, ReportedReaction[]]>();
 
   function emitTyping(chatId: string, isTyping: boolean) {
     _typingCallbacks.forEach((cb) => cb(chatId, isTyping));
@@ -302,6 +171,30 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           );
         }, new Raw({}));
 
+        client.addEventHandler(
+          (event: EditedMessageEvent) => {
+            const msg = event.message;
+            // The sender is already known; an edit doesn't change it
+            const message = toMessage(msg, msg.sender as GramJSSender | undefined);
+            edits.emit(message, msg.chatId?.toString() ?? "", extractReactions(msg.reactions));
+          },
+          new EditedMessage({}),
+        );
+
+        client.addEventHandler((event: DeletedMessageEvent) => {
+          // Only channels and supergroups say where
+          const chatId = event.peer ? utils.getPeerId(event.peer).toString() : undefined;
+          deletions.emit(event.deletedIds, chatId);
+        }, new DeletedMessage({}));
+
+        client.addEventHandler(
+          (update: Api.UpdateMessageReactions) => {
+            const reactions = extractReactions(update.reactions) ?? [];
+            reactionChanges.emit(utils.getPeerId(update.peer).toString(), update.msgId, reactions);
+          },
+          new Raw({ types: [Api.UpdateMessageReactions] }),
+        );
+
         // GramJS reports drops it notices (failed pings, closed sockets, waking
         // from sleep) and when it gets the connection back
         client.addEventHandler(
@@ -345,6 +238,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           title: d.title ?? "Unknown",
           unreadCount: d.unreadCount ?? 0,
           isGroup: d.isGroup ?? false,
+          isChannel: d.isChannel,
           isMuted: isMuted(d.dialog),
           // getDialogs attaches each message's sender, so this needs no extra request
           // MessageEmpty has no date (or anything else worth previewing)
@@ -354,21 +248,8 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
 
     async getMessages(chatId: string, limit = 50, offsetId?: number) {
       const rawMessages = await client.getMessages(chatId, { limit, offsetId });
-
-      // Build a map of message IDs to sender names for reply resolution
-      const msgIdToSender = new Map<number, string>();
-      for (const m of rawMessages) {
-        msgIdToSender.set(m.id, formatSenderName(m.sender as GramJSSender | undefined));
-      }
-
       // Reverse to get chronological order (oldest first)
-      return rawMessages.map((m) => ({
-        ...toMessage(m, m.sender as GramJSSender | undefined),
-        replyToMsgId: m.replyTo?.replyToMsgId,
-        replyToSenderName: m.replyTo?.replyToMsgId
-          ? msgIdToSender.get(m.replyTo.replyToMsgId) ?? "Unknown"
-          : undefined,
-      })).reverse();
+      return rawMessages.map((m) => toMessage(m, m.sender as GramJSSender | undefined)).reverse();
     },
 
     async sendMessage(chatId: string, text: string, replyToMsgId?: number, replyToSenderName?: string) {
@@ -438,6 +319,10 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
       };
     },
 
+    onMessageEdited: edits.subscribe,
+    onMessagesDeleted: deletions.subscribe,
+    onReactionsChanged: reactionChanges.subscribe,
+
     onTyping(callback) {
       _typingCallbacks.add(callback);
       return () => {
@@ -446,17 +331,21 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
     },
 
     async downloadMedia(message: Message): Promise<Buffer | undefined> {
-      if (!message.media?._message) return undefined;
-      const buffer = await client.downloadMedia(message.media._message, {});
-      return buffer as Buffer;
+      const media = message.media;
+      if (!media?._message) return undefined;
+      if (needsPreviewFrame(media)) {
+        const frame = previewFrame(media._message);
+        if (!frame) throw new Error("No preview image here. Open it in Telegram to watch it");
+        // By its type: GramJS can't match a progressive size passed as an
+        // object, and would fall back to downloading the whole video
+        return (await client.downloadMedia(media._message, { thumb: frame.type as never })) as Buffer;
+      }
+      return (await client.downloadMedia(media._message, {})) as Buffer;
     },
 
-    async markAsRead(chatId: string, maxMessageId?: number): Promise<boolean> {
-      try {
-        return await client.markAsRead(chatId, maxMessageId ? [maxMessageId] : undefined);
-      } catch {
-        return false;
-      }
+    // Read sync retries a failure
+    markAsRead(chatId: string, maxMessageId?: number): Promise<boolean> {
+      return client.markAsRead(chatId, maxMessageId ? [maxMessageId] : undefined);
     },
 
     async sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean> {

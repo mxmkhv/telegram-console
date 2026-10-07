@@ -794,3 +794,88 @@ describe("MainApp navigation keys", () => {
   });
 });
 
+
+describe("MainApp changes made elsewhere", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  beforeEach(() => { svc = createMockTelegramService(); });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  // Elon's chat with 12 messages, more than fit, so the header counts them.
+  // Messages focused, the newest selected.
+  const openChat = async () => {
+    const added = [1, 2, 3, 4].map((n) => svc.simulateIncomingMessage("1", `filler ${n}`));
+    const app = render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+    await wait(250);
+    await press(app.stdin, "\r", "\x1b");
+    expect(app.lastFrame()).toContain("(12/12)");
+    return { ...app, newest: added.at(-1)! };
+  };
+  const text = (frame: string | undefined) => (frame ?? "").replace(/\u00A0/g, " ");
+
+  it("shows edits, reactions and deletes in the open chat", async () => {
+    const { lastFrame, newest } = await openChat();
+
+    svc.simulateEdit("1", newest.id, "filler, but edited");
+    await wait();
+    expect(lastFrame()).toContain("filler, but edited");
+
+    svc.simulateReactions("1", newest.id, [{ emoji: "🔥", count: 2, hasUserReacted: undefined }]);
+    await wait();
+    expect(lastFrame()).toContain("🔥2");
+
+    svc.simulateDelete("1", [newest.id]);
+    await wait();
+    expect(lastFrame()).not.toContain("filler, but edited");
+    expect(lastFrame()).toContain("(11/11)");
+  });
+
+  it("keeps the selection on its message when one above it is deleted", async () => {
+    const { lastFrame, stdin } = await openChat();
+    await press(stdin, "k", "k");
+    expect(lastFrame()).toContain("(10/12)");
+
+    svc.simulateDelete("1", [2]);
+    await wait();
+    expect(lastFrame()).toContain("(9/11)");
+  });
+
+  it("names who a live reply answers", async () => {
+    const { lastFrame } = await openChat();
+    const answered = svc.simulateIncomingMessage("1", "Because I said so", { replyToMsgId: 3 });
+    await wait();
+    expect(answered.replyToSenderName).toBeUndefined();
+    expect(text(lastFrame())).toContain("↩Elon: Elon Musk: Because I said so");
+  });
+
+  it("marks messages read once they're on screen", async () => {
+    const marked: Array<[string, number | undefined]> = [];
+    svc.markAsRead = async (chatId, maxMessageId) => {
+      marked.push([chatId, maxMessageId]);
+      return true;
+    };
+    const { stdin, newest } = await openChat();
+    await wait(1100);
+    expect(marked).toEqual([["1", newest.id]]);
+
+    // Scrolled to the top, a new message is below the view: not read yet
+    await press(stdin, "g");
+    const arrival = svc.simulateIncomingMessage("1", "unseen for now");
+    await wait(1100);
+    expect(marked).toEqual([["1", newest.id]]);
+
+    await press(stdin, "G");
+    await wait(1100);
+    expect(marked).toEqual([["1", newest.id], ["1", arrival.id]]);
+  });
+});

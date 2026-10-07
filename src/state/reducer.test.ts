@@ -640,3 +640,124 @@ describe("MERGE_MESSAGES", () => {
     expect(state.messages.c!.map((m) => m.text)).toEqual(["edited elsewhere", "my edit", "m3", "sending"]);
   });
 });
+
+describe("changes made elsewhere", () => {
+  const msg = (id: number, text = `m${id}`): Message => ({ id, senderId: "u", senderName: "A", text, timestamp: new Date(), isOutgoing: false });
+  const chat = (id: string) => ({ id, title: id, unreadCount: 0, isGroup: false });
+  const withMessages = (lists: Record<string, Message[]>) =>
+    Object.entries(lists).reduce(
+      (state, [chatId, messages]) => appReducer(state, { type: "SET_MESSAGES", payload: { chatId, messages } }),
+      appReducer(initialState, {
+        type: "SET_CHATS",
+        payload: Object.entries(lists).map(([id, messages]) => ({ ...chat(id), lastMessage: messages.at(-1) })),
+      }),
+    );
+
+  it("applies an edit, and the chat list preview follows", () => {
+    const state = appReducer(withMessages({ c: [msg(1), msg(2)] }), {
+      type: "MESSAGE_EDITED",
+      payload: { chatId: "c", message: msg(2, "fixed typo"), reactions: [{ emoji: "👍", count: 1, hasUserReacted: false }] },
+    });
+    expect(state.messages.c![1]!.text).toBe("fixed typo");
+    expect(state.messages.c![1]!.reactions).toEqual([{ emoji: "👍", count: 1, hasUserReacted: false }]);
+    expect(state.chats[0]!.lastMessage?.text).toBe("fixed typo");
+  });
+
+  it("keeps your reaction when an edit doesn't say which are yours", () => {
+    const mine: Message = { ...msg(1), reactions: [{ emoji: "🔥", count: 1, hasUserReacted: true }] };
+    const state = appReducer(withMessages({ c: [mine] }), {
+      type: "MESSAGE_EDITED",
+      payload: { chatId: "c", message: msg(1, "edited"), reactions: [{ emoji: "🔥", count: 1, hasUserReacted: undefined }] },
+    });
+    expect(state.messages.c![0]!.reactions).toEqual([{ emoji: "🔥", count: 1, hasUserReacted: true }]);
+  });
+
+  it("leaves your own edit in flight to its result", () => {
+    const editing: Message = { ...msg(1, "mine"), delivery: { action: "edit", status: "pending", originalText: "m1" } };
+    const state = appReducer(withMessages({ c: [editing] }), {
+      type: "MESSAGE_EDITED",
+      payload: { chatId: "c", message: msg(1, "older edit"), reactions: undefined },
+    });
+    expect(state.messages.c![0]!.text).toBe("mine");
+  });
+
+  it("removes deleted messages and previews what came before", () => {
+    const state = appReducer(withMessages({ c: [msg(1), msg(2), msg(3)] }), {
+      type: "MESSAGES_DELETED",
+      payload: { chatId: "c", messageIds: [3, 1] },
+    });
+    expect(state.messages.c!.map((m) => m.id)).toEqual([2]);
+    expect(state.chats[0]!.lastMessage?.id).toBe(2);
+  });
+
+  it("applies a delete without a chat to private chats and small groups, not channels", () => {
+    // GramJS doesn't pad channel ids: -100 then 9 digits is still a supergroup
+    let state = withMessages({ "42": [msg(7)], "-1001234": [msg(7)], "-100123456789": [msg(7)] });
+    state = appReducer(state, {
+      type: "SET_CHATS",
+      payload: state.chats.map((c) => (c.id === "-100123456789" ? { ...c, isChannel: true } : c)),
+    });
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: undefined, messageIds: [7] } });
+    expect(state.messages["42"]).toEqual([]);
+    expect(state.messages["-1001234"]).toEqual([]);
+    expect(state.messages["-100123456789"]!.map((m) => m.id)).toEqual([7]);
+    expect(state.chats.find((c) => c.id === "-100123456789")!.lastMessage?.id).toBe(7);
+  });
+
+  it("closes what was open on a deleted message, and says why", () => {
+    let state = appReducer(withMessages({ c: [msg(1), msg(2)] }), { type: "SELECT_CHAT", payload: "c" });
+    state = appReducer(state, { type: "OPEN_MEDIA_PANEL", payload: { messageId: 2 } });
+    state = appReducer(state, { type: "SET_REPLYING_TO", payload: msg(1) });
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: "c", messageIds: [2] } });
+    expect(state.mediaPanel.isOpen).toBe(false);
+    expect(state.focusedPanel).toBe("messages");
+    expect(state.notice?.text).toBe("That message was deleted");
+    expect(state.replyingToMessage?.id).toBe(1);
+
+    state = appReducer(state, { type: "SET_REACTION_OVERLAY", payload: { kind: "picker", messageId: 1 } });
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: "c", messageIds: [1] } });
+    expect(state.reactionOverlay).toBeNull();
+    expect(state.replyingToMessage).toBeNull();
+    expect(state.notice?.text).toBe("The message you were replying to was deleted");
+  });
+
+  it("ends an edit of a deleted message, here or in another chat's draft", () => {
+    const mine: Message = { ...msg(1), isOutgoing: true };
+    let state = appReducer(withMessages({ c: [mine], d: [msg(5)] }), { type: "SELECT_CHAT", payload: "c" });
+    state = appReducer(state, { type: "SET_EDITING_MESSAGE", payload: mine });
+    state = appReducer(state, { type: "SAVE_DRAFT", payload: { chatId: "d", draft: { text: "re", replyTo: msg(5), editing: null } } });
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: "c", messageIds: [1] } });
+    expect(state.editingMessage).toBeNull();
+    expect(state.notice?.text).toBe("The message you were editing was deleted");
+
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: "d", messageIds: [5] } });
+    expect(state.drafts.d).toEqual({ text: "re", replyTo: null, editing: null });
+  });
+
+  it("updates the preview of a chat that isn't open", () => {
+    const state = appReducer(
+      appReducer(initialState, { type: "SET_CHATS", payload: [{ ...chat("c"), lastMessage: msg(3) }] }),
+      { type: "MESSAGE_EDITED", payload: { chatId: "c", message: msg(3, "fixed"), reactions: undefined } },
+    );
+    expect(state.chats[0]!.lastMessage?.text).toBe("fixed");
+  });
+
+  it("takes new reaction counts, keeping which are yours when the update leaves that out", () => {
+    const mine: Message = { ...msg(1), reactions: [{ emoji: "🔥", count: 1, hasUserReacted: true }] };
+    const state = appReducer(withMessages({ c: [mine] }), {
+      type: "SET_REACTIONS",
+      payload: {
+        chatId: "c",
+        messageId: 1,
+        reactions: [
+          { emoji: "🔥", count: 2, hasUserReacted: undefined },
+          { emoji: "👍", count: 1, hasUserReacted: undefined },
+        ],
+      },
+    });
+    expect(state.messages.c![0]!.reactions).toEqual([
+      { emoji: "🔥", count: 2, hasUserReacted: true },
+      { emoji: "👍", count: 1, hasUserReacted: false },
+    ]);
+  });
+});

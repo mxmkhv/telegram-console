@@ -991,3 +991,99 @@ describe("MessageView tall messages", () => {
     expect(actions).toContainEqual({ type: "SET_FOCUSED_PANEL", payload: "input" });
   });
 });
+
+describe("MessageView replies, forwards and media", () => {
+  const msg = (id: number, overrides: Partial<Message> = {}): Message => ({
+    id,
+    senderId: "alice",
+    senderName: "Alice",
+    text: `message ${id}`,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+    ...overrides,
+  });
+  const media = (fields: Omit<NonNullable<Message["media"]>, "_message">) => ({ ...fields, _message: {} as never });
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Alice"
+      messages={[]}
+      selectedIndex={0}
+      width={70}
+      height={14}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+  // Names and labels keep together with no-break spaces
+  const text = (shown: string | undefined) => (shown ?? "").replace(/\u00A0/g, " ");
+  const frame = (props: Partial<React.ComponentProps<typeof MessageView>>) => text(renderWithProvider(view(props)).lastFrame());
+
+  it("names who a live reply answers, from the messages loaded", () => {
+    const messages = [msg(1, { senderId: "me", senderName: "Max", isOutgoing: true }), msg(2, { replyToMsgId: 1 })];
+    expect(frame({ messages, selectedIndex: 1 })).toContain("↩You: Alice: message 2");
+    expect(frame({ messages, selectedIndex: 1, messageLayout: "bubble" })).toContain("↩ You");
+  });
+
+  it("shows who a forward is from, in both layouts", () => {
+    const messages = [msg(1, { forwardedFrom: "SpaceX", text: "launch Friday" })];
+    expect(frame({ messages })).toContain("Alice: ↪ from SpaceX: launch Friday");
+    expect(frame({ messages, messageLayout: "bubble" })).toContain("↪ Forwarded from SpaceX");
+  });
+
+  it("labels polls, places and files that used to show up empty", () => {
+    const messages = [
+      msg(1, { text: "", media: media({ type: "poll", title: "Lunch?" }) }),
+      msg(2, { text: "", media: media({ type: "location", title: "Cafe, Main St 1" }) }),
+      msg(3, { text: "notes", media: media({ type: "document", fileName: "report.pdf", fileSize: 2048 }) }),
+    ];
+    const shown = frame({ messages, selectedIndex: 2 });
+    expect(shown).toContain("[📊 Poll: Lunch?]");
+    expect(shown).toContain("[📍 Location: Cafe, Main St 1]");
+    expect(shown).toContain("[📄 report.pdf: 2.0KB] notes");
+  });
+
+  it("offers to view only what the media panel can draw", async () => {
+    for (const [attachment, viewable] of [
+      [media({ type: "photo" }), true],
+      [media({ type: "video", duration: 5 }), true],
+      [media({ type: "poll", title: "Lunch?" }), false],
+      [media({ type: "document", fileName: "a.pdf", mimeType: "application/pdf" }), false],
+    ] as const) {
+      const actions: string[] = [];
+      const { lastFrame, stdin } = renderWithProvider(
+        view({ messages: [msg(1, { media: attachment })], dispatch: (action) => actions.push(action.type) }),
+      );
+      expect((lastFrame() ?? "").includes("[Press enter to view]")).toBe(viewable);
+      stdin.write("\r");
+      await new Promise((r) => setTimeout(r, 30));
+      expect(actions.includes("OPEN_MEDIA_PANEL")).toBe(viewable);
+    }
+  });
+
+  it("reports the newest message on screen, for read sync", () => {
+    const seen: Array<[string, number]> = [];
+    const messages = Array.from({ length: 30 }, (_, i) => msg(i + 1));
+    const shown = text(renderWithProvider(view({ messages, selectedIndex: 2, onSeen: (chatId, id) => seen.push([chatId, id]) })).lastFrame());
+    const newestShown = Math.max(...[...shown.matchAll(/message (\d+)/g)].map((m) => Number(m[1])));
+    // The top of a long chat, not its end
+    expect(newestShown).toBeLessThan(30);
+    expect(seen.at(-1)).toEqual(["1", newestShown]);
+  });
+
+  it("reports nothing while the emoji grid covers the messages", () => {
+    const seen: number[] = [];
+    renderWithProvider(
+      view({ messages: [msg(1)], reactionOverlay: { kind: "modal", messageId: 1 }, onSeen: (_chatId, id) => seen.push(id) }),
+    );
+    expect(seen).toEqual([]);
+  });
+});

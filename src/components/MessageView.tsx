@@ -5,6 +5,7 @@ import wrapAnsi from "wrap-ansi";
 import { Box, Text, useSkin } from "./ui";
 import type { LoadStatus, Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
+import { canViewMedia } from "../utils/media.js";
 import type { AppAction, ReactionOverlay } from "../state/reducer.js";
 import { Logo, LOGO_COLS, LOGO_ROWS } from "./Logo";
 import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
@@ -43,6 +44,8 @@ interface MessageViewProps {
   isTyping?: boolean;
   /** Whether the selected message, taller than the panel, has lines below the view */
   onLinesBelowChange?: (linesBelow: boolean) => void;
+  /** The newest message on screen, for read sync */
+  onSeen?: (chatId: string, messageId: number) => void;
 }
 
 // Rows a line takes once Ink wraps it: Ink wraps with this same wrap-ansi call
@@ -90,6 +93,23 @@ function splitLines(text: string): string[] {
   return text.replace(/\t/g, "    ").split("\n");
 }
 
+const keepTogether = (text: string) => text.replace(/ /g, "\u00A0");
+
+function hasViewableMedia(msg: Message): boolean {
+  return !!msg.media && canViewMedia(msg.media);
+}
+
+// Reply names come from the messages loaded here: live messages arrive
+// without one, and a page loaded later can name what was missing
+function withReplyNames(messages: Message[]): Message[] {
+  const names = new Map(messages.map((m) => [m.id, m.isOutgoing ? "You" : m.senderName]));
+  return messages.map((m) => {
+    if (!m.replyToMsgId) return m;
+    const name = names.get(m.replyToMsgId) ?? m.replyToSenderName;
+    return name === m.replyToSenderName ? m : { ...m, replyToSenderName: name };
+  });
+}
+
 // A classic first line's pieces, in render order. They're styled separately,
 // but Ink wraps them as one string, so counting joins them the same way.
 function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
@@ -97,10 +117,11 @@ function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
   return {
     time: `[${formatTime(msg.timestamp)}]\u00A0`,
     reply: msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}:\u00A0` : "",
-    name: `${senderName.replace(/ /g, "\u00A0")}:`,
-    media: msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : "",
+    name: `${keepTogether(senderName)}:`,
+    forward: msg.forwardedFrom ? ` ↪\u00A0from ${msg.forwardedFrom}:` : "",
+    media: msg.media ? ` ${formatMediaMetadata(msg.media)}` : "",
     text: ` ${text}`,
-    viewHint: isSelected && msg.media ? " [Press enter to view]" : "",
+    viewHint: isSelected && hasViewableMedia(msg) ? " [Press enter to view]" : "",
     reactions: formatReactions(msg.reactions),
     delivery: formatDelivery(msg),
     retryHint: formatRetryHint(msg, isSelected),
@@ -118,8 +139,8 @@ function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: 
 
 // Bubble text lines (media info on the first) and the last line's suffix pieces
 function getBubbleContent(msg: Message, isSelected: boolean) {
-  const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
-  const viewHint = isSelected && msg.media ? " [Enter]" : "";
+  const mediaInfo = msg.media ? formatMediaMetadata(msg.media) : "";
+  const viewHint = isSelected && hasViewableMedia(msg) ? " [Enter]" : "";
   const lines = splitLines(msg.text).map((line, i) =>
     // A blank line still takes its counted row
     i === 0 && mediaInfo ? `${line} ${mediaInfo}${viewHint}`.trim() : line || " ",
@@ -142,14 +163,15 @@ function getBubbleMessageLineCount(
 ): number {
   const nameRows = isGroupChat && !msg.isOutgoing ? 1 : 0;
   const replyRows = msg.replyToMsgId ? 1 : 0;
+  const forwardRows = msg.forwardedFrom ? 1 : 0;
   const { fullLines } = getBubbleContent(msg, isSelected);
-  return fullLines.reduce((rows, line) => rows + countWrappedLines(line, availableWidth), nameRows + replyRows);
+  return fullLines.reduce((rows, line) => rows + countWrappedLines(line, availableWidth), nameRows + replyRows + forwardRows);
 }
 
 function MessageViewInner({
   isFocused,
   selectedChatTitle,
-  messages: chatMessages,
+  messages: loadedMessages,
   selectedIndex,
   isLoadingOlder = false,
   loadStatus = "ready",
@@ -169,8 +191,10 @@ function MessageViewInner({
   reactionOverlay,
   isTyping,
   onLinesBelowChange,
+  onSeen,
 }: MessageViewProps) {
   const skin = useSkin();
+  const chatMessages = useMemo(() => withReplyNames(loadedMessages), [loadedMessages]);
   // panelDividers skins drop the left/right/outer-top/bottom border, leaving
   // only the header row + its divider (no outer border rows to subtract).
   const visibleLines = Math.max(1, height - (skin.panelDividers ? 2 : 4));
@@ -289,7 +313,7 @@ function MessageViewInner({
           }
         }
 
-        if (selectedMessage?.media) {
+        if (selectedMessage && hasViewableMedia(selectedMessage)) {
           dispatch({
             type: "OPEN_MEDIA_PANEL",
             payload: { messageId: selectedMessage.id },
@@ -536,6 +560,12 @@ function MessageViewInner({
     onLinesBelowChange?.(linesBelow > 0);
   }, [linesBelow, onLinesBelowChange]);
 
+  // Unsent messages have no server id to mark read up to
+  const newestShownId = reactionModalOpen ? undefined : chatMessages.slice(0, endIndex).findLast((m) => m.id > 0)?.id;
+  useEffect(() => {
+    if (chatId && newestShownId !== undefined) onSeen?.(chatId, newestShownId);
+  }, [chatId, newestShownId, onSeen]);
+
   // Check if user is viewing the bottom of messages
   const isAtBottom = selectedIndex >= chatMessages.length - 1 && linesBelow === 0;
 
@@ -597,6 +627,9 @@ function MessageViewInner({
             {firstLine.name}
           </Text>
           <Text inverse={isSelected} dimColor>
+            {firstLine.forward}
+          </Text>
+          <Text inverse={isSelected} dimColor>
             {firstLine.media}
           </Text>
           <Text inverse={isSelected}>{firstLine.text}</Text>
@@ -644,6 +677,12 @@ function MessageViewInner({
         {msg.replyToMsgId && (
           <Text dimColor wrap="truncate">
             ↩ {msg.replyToSenderName ?? "Unknown"}
+          </Text>
+        )}
+
+        {msg.forwardedFrom && (
+          <Text dimColor wrap="truncate">
+            ↪ Forwarded from {msg.forwardedFrom}
           </Text>
         )}
 
