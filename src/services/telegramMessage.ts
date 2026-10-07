@@ -32,7 +32,7 @@ function formatCoordinates(geo: Api.TypeGeoPoint): string | undefined {
 }
 
 function extractDocument(msg: Api.Message, media: Api.MessageMediaDocument, doc: Api.Document): MediaAttachment {
-  const base = { fileSize: Number(doc.size), mimeType: doc.mimeType, _message: msg };
+  const base = { fileId: `document:${doc.id.toString()}`, fileSize: Number(doc.size), mimeType: doc.mimeType, _message: msg };
   const sticker = documentAttribute(doc, Api.DocumentAttributeSticker);
   if (sticker) {
     const isAnimated = doc.mimeType === "application/x-tgsticker" || doc.mimeType === "video/webm";
@@ -65,6 +65,21 @@ function extractDocument(msg: Api.Message, media: Api.MessageMediaDocument, doc:
   return { ...base, type: "document", fileName };
 }
 
+/** The largest still image of a video or animated sticker */
+export function previewFrame(msg: Api.Message): Api.TypePhotoSize | undefined {
+  const doc = msg.media instanceof Api.MessageMediaDocument ? msg.media.document : undefined;
+  if (!(doc instanceof Api.Document)) return undefined;
+  const thumbs = doc.thumbs ?? [];
+  const largest = <T extends { w: number; h: number }>(sizes: T[]) => sizes.sort((a, b) => a.w * a.h - b.w * b.h).at(-1);
+  // Plain sizes first: GramJS knows their byte size, so it fetches just the image
+  return (
+    largest(thumbs.filter((t) => t instanceof Api.PhotoSize)) ??
+    largest(thumbs.filter((t) => t instanceof Api.PhotoSizeProgressive)) ??
+    // A blurry inline one beats nothing
+    thumbs.find((t) => t instanceof Api.PhotoStrippedSize)
+  );
+}
+
 export function extractMedia(msg: Api.Message): MediaAttachment | undefined {
   const { media } = msg;
   // A link preview's link is in the text already
@@ -78,6 +93,7 @@ export function extractMedia(msg: Api.Message): MediaAttachment | undefined {
     const largest = media.photo.sizes.at(-1) as { size?: number; w?: number; h?: number } | undefined;
     return {
       type: "photo",
+      fileId: `photo:${media.photo.id.toString()}`,
       fileSize: largest?.size,
       width: largest?.w,
       height: largest?.h,
@@ -128,7 +144,7 @@ export function extractMedia(msg: Api.Message): MediaAttachment | undefined {
     return { type: "other", title: "Giveaway", _message: msg };
   }
   // Anything newer than this client: say so rather than show an empty message
-  return { type: "other", title: "Not supported here, open Telegram to see it", _message: msg };
+  return { type: "other", title: "Unsupported message", _message: msg };
 }
 
 function capitalize(s: string): string {

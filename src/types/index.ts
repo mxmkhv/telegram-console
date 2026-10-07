@@ -48,6 +48,8 @@ export interface MediaAttachment {
   type: MediaType;
   /** Poll question, place, contact or song; for "other", what it is */
   title?: string;
+  /** Telegram's id for the file: the same across chats and reloads, new when edited */
+  fileId?: string;
   fileSize?: number;
   width?: number;
   height?: number;
@@ -141,7 +143,9 @@ export interface TelegramService {
   onConnectionStateChange(callback: (state: ConnectionState) => void): () => void;
   onNewMessage(callback: (message: Message, chatId: string) => void): () => void;
   /** An edit, by anyone. In private chats and small groups, reaction changes arrive this way too. */
-  onMessageEdited(callback: (message: Message, chatId: string) => void): () => void;
+  onMessageEdited(
+    callback: (message: Message, chatId: string, reactions: ReportedReaction[] | undefined) => void,
+  ): () => void;
   /**
    * Deleted messages. Without a chat id they're from private chats or small
    * groups, where message ids are unique across all of them.

@@ -656,18 +656,27 @@ describe("changes made elsewhere", () => {
   it("applies an edit, and the chat list preview follows", () => {
     const state = appReducer(withMessages({ c: [msg(1), msg(2)] }), {
       type: "MESSAGE_EDITED",
-      payload: { chatId: "c", message: { ...msg(2, "fixed typo"), reactions: [{ emoji: "👍", count: 1, hasUserReacted: false }] } },
+      payload: { chatId: "c", message: msg(2, "fixed typo"), reactions: [{ emoji: "👍", count: 1, hasUserReacted: false }] },
     });
     expect(state.messages.c![1]!.text).toBe("fixed typo");
     expect(state.messages.c![1]!.reactions).toEqual([{ emoji: "👍", count: 1, hasUserReacted: false }]);
     expect(state.chats[0]!.lastMessage?.text).toBe("fixed typo");
   });
 
+  it("keeps your reaction when an edit doesn't say which are yours", () => {
+    const mine: Message = { ...msg(1), reactions: [{ emoji: "🔥", count: 1, hasUserReacted: true }] };
+    const state = appReducer(withMessages({ c: [mine] }), {
+      type: "MESSAGE_EDITED",
+      payload: { chatId: "c", message: msg(1, "edited"), reactions: [{ emoji: "🔥", count: 1, hasUserReacted: undefined }] },
+    });
+    expect(state.messages.c![0]!.reactions).toEqual([{ emoji: "🔥", count: 1, hasUserReacted: true }]);
+  });
+
   it("leaves your own edit in flight to its result", () => {
     const editing: Message = { ...msg(1, "mine"), delivery: { action: "edit", status: "pending", originalText: "m1" } };
     const state = appReducer(withMessages({ c: [editing] }), {
       type: "MESSAGE_EDITED",
-      payload: { chatId: "c", message: msg(1, "older edit") },
+      payload: { chatId: "c", message: msg(1, "older edit"), reactions: undefined },
     });
     expect(state.messages.c![0]!.text).toBe("mine");
   });
@@ -682,13 +691,14 @@ describe("changes made elsewhere", () => {
   });
 
   it("applies a delete without a chat to private chats and small groups, not channels", () => {
-    const state = appReducer(withMessages({ "42": [msg(7)], "-99": [msg(7)], "-1001234": [msg(7)] }), {
+    const state = appReducer(withMessages({ "42": [msg(7)], "-1001234": [msg(7)], "-1001234567890": [msg(7)] }), {
       type: "MESSAGES_DELETED",
       payload: { chatId: undefined, messageIds: [7] },
     });
     expect(state.messages["42"]).toEqual([]);
-    expect(state.messages["-99"]).toEqual([]);
-    expect(state.messages["-1001234"]!.map((m) => m.id)).toEqual([7]);
+    // A small group whose id happens to start with -100
+    expect(state.messages["-1001234"]).toEqual([]);
+    expect(state.messages["-1001234567890"]!.map((m) => m.id)).toEqual([7]);
   });
 
   it("closes what was open on a deleted message, and says why", () => {
@@ -706,6 +716,27 @@ describe("changes made elsewhere", () => {
     expect(state.reactionOverlay).toBeNull();
     expect(state.replyingToMessage).toBeNull();
     expect(state.notice?.text).toBe("The message you were replying to was deleted");
+  });
+
+  it("ends an edit of a deleted message, here or in another chat's draft", () => {
+    const mine: Message = { ...msg(1), isOutgoing: true };
+    let state = appReducer(withMessages({ c: [mine], d: [msg(5)] }), { type: "SELECT_CHAT", payload: "c" });
+    state = appReducer(state, { type: "SET_EDITING_MESSAGE", payload: mine });
+    state = appReducer(state, { type: "SAVE_DRAFT", payload: { chatId: "d", draft: { text: "re", replyTo: msg(5), editing: null } } });
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: "c", messageIds: [1] } });
+    expect(state.editingMessage).toBeNull();
+    expect(state.notice?.text).toBe("The message you were editing was deleted");
+
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: "d", messageIds: [5] } });
+    expect(state.drafts.d).toEqual({ text: "re", replyTo: null, editing: null });
+  });
+
+  it("updates the preview of a chat that isn't open", () => {
+    const state = appReducer(
+      appReducer(initialState, { type: "SET_CHATS", payload: [{ ...chat("c"), lastMessage: msg(3) }] }),
+      { type: "MESSAGE_EDITED", payload: { chatId: "c", message: msg(3, "fixed"), reactions: undefined } },
+    );
+    expect(state.chats[0]!.lastMessage?.text).toBe("fixed");
   });
 
   it("takes new reaction counts, keeping which are yours when the update leaves that out", () => {

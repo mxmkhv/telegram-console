@@ -84,7 +84,7 @@ export function MediaPanel({ message, panelWidth, panelHeight, downloadMedia, on
 
     (async () => {
       try {
-        const buffer = await getMediaBuffer(messageId, () => downloadMedia(message));
+        const buffer = await getMediaBuffer(media, () => downloadMedia(message));
         if (cancelled || !buffer) {
           if (!cancelled && !buffer) {
             setError('Failed to download');

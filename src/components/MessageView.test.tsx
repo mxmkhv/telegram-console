@@ -1024,8 +1024,8 @@ describe("MessageView replies, forwards and media", () => {
     />
   );
   // Names and labels keep together with no-break spaces
-  const frame = (props: Partial<React.ComponentProps<typeof MessageView>>) =>
-    (renderWithProvider(view(props)).lastFrame() ?? "").replace(/\u00A0/g, " ");
+  const text = (shown: string | undefined) => (shown ?? "").replace(/\u00A0/g, " ");
+  const frame = (props: Partial<React.ComponentProps<typeof MessageView>>) => text(renderWithProvider(view(props)).lastFrame());
 
   it("names who a live reply answers, from the messages loaded", () => {
     const messages = [msg(1, { senderId: "me", senderName: "Max", isOutgoing: true }), msg(2, { replyToMsgId: 1 })];
@@ -1072,11 +1072,18 @@ describe("MessageView replies, forwards and media", () => {
   it("reports the newest message on screen, for read sync", () => {
     const seen: Array<[string, number]> = [];
     const messages = Array.from({ length: 30 }, (_, i) => msg(i + 1));
-    renderWithProvider(view({ messages, selectedIndex: 2, onSeen: (chatId, id) => seen.push([chatId, id]) }));
-    const [chatId, newest] = seen.at(-1)!;
-    expect(chatId).toBe("1");
+    const shown = text(renderWithProvider(view({ messages, selectedIndex: 2, onSeen: (chatId, id) => seen.push([chatId, id]) })).lastFrame());
+    const newestShown = Math.max(...[...shown.matchAll(/message (\d+)/g)].map((m) => Number(m[1])));
     // The top of a long chat, not its end
-    expect(newest).toBeGreaterThan(2);
-    expect(newest).toBeLessThan(30);
+    expect(newestShown).toBeLessThan(30);
+    expect(seen.at(-1)).toEqual(["1", newestShown]);
+  });
+
+  it("reports nothing while the emoji grid covers the messages", () => {
+    const seen: number[] = [];
+    renderWithProvider(
+      view({ messages: [msg(1)], reactionOverlay: { kind: "modal", messageId: 1 }, onSeen: (_chatId, id) => seen.push(id) }),
+    );
+    expect(seen).toEqual([]);
   });
 });

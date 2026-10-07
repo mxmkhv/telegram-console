@@ -68,7 +68,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
     () => createReadSync((chatId, messageId) => telegramService.markAsRead(chatId, messageId)),
     [telegramService],
   );
-  useEffect(() => () => readSync.stop(), [readSync]);
+  useEffect(() => () => readSync.close(), [readSync]);
   const [readPosition, setReadPosition] = useState<{ chatId: string; messageId: number } | null>(null);
   const handleSeen = useCallback((chatId: string, messageId: number) => setReadPosition({ chatId, messageId }), []);
   useEffect(() => {
@@ -201,8 +201,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
       dispatch({ type: "SET_TYPING", payload: { chatId, isTyping } });
     });
 
-    const unsubEdits = telegramService.onMessageEdited((message, chatId) => {
-      dispatch({ type: "MESSAGE_EDITED", payload: { chatId, message } });
+    const unsubEdits = telegramService.onMessageEdited((message, chatId, reactions) => {
+      dispatch({ type: "MESSAGE_EDITED", payload: { chatId, message, reactions } });
     });
     const unsubDeletes = telegramService.onMessagesDeleted((messageIds, chatId) => {
       dispatch({ type: "MESSAGES_DELETED", payload: { chatId, messageIds } });

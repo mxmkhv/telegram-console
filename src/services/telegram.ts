@@ -5,7 +5,7 @@ import { EditedMessage, type EditedMessageEvent } from "telegram/events/EditedMe
 import { DeletedMessage, type DeletedMessageEvent } from "telegram/events/DeletedMessage";
 import { UpdateConnectionState } from "telegram/network";
 import { createConnectionWatchdog, readConnectionReport } from "./connectionWatchdog";
-import { extractMedia, extractReactions, toMessage, type GramJSSender } from "./telegramMessage";
+import { extractMedia, extractReactions, previewFrame, toMessage, type GramJSSender } from "./telegramMessage";
 import { createListeners } from "../utils/listeners";
 import { needsPreviewFrame } from "../utils/media";
 import type { TelegramService, ConnectionState, Message, ReportedReaction } from "../types";
@@ -16,16 +16,6 @@ function isMuted(dialog: Api.TypeDialog | undefined): boolean {
   if (!(dialog instanceof Api.Dialog)) return false;
   const muteUntil = dialog.notifySettings.muteUntil;
   return muteUntil !== undefined && muteUntil * 1000 > Date.now();
-}
-
-// The largest still image of a video or animated sticker
-function previewFrame(msg: Api.Message): Api.TypePhotoSize | undefined {
-  const doc = msg.media instanceof Api.MessageMediaDocument ? msg.media.document : undefined;
-  if (!(doc instanceof Api.Document)) return undefined;
-  const sizes = (doc.thumbs ?? []).filter((t) => t instanceof Api.PhotoSize || t instanceof Api.PhotoSizeProgressive);
-  const largest = sizes.sort((a, b) => a.w * a.h - b.w * b.h).at(-1);
-  // A blurry inline one beats nothing
-  return largest ?? doc.thumbs?.find((t) => t instanceof Api.PhotoStrippedSize);
 }
 
 const TYPING_TIMEOUT_MS = 6000;
@@ -61,7 +51,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
   let eventHandlerAdded = false;
   const _typingCallbacks = new Set<(chatId: string, isTyping: boolean) => void>();
   const _typingTimers = new Map<string, NodeJS.Timeout>();
-  const edits = createListeners<[Message, string]>();
+  const edits = createListeners<[Message, string, ReportedReaction[] | undefined]>();
   const deletions = createListeners<[number[], string | undefined]>();
   const reactionChanges = createListeners<[string, number, ReportedReaction[]]>();
 
@@ -182,10 +172,11 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         }, new Raw({}));
 
         client.addEventHandler(
-          async (event: EditedMessageEvent) => {
+          (event: EditedMessageEvent) => {
             const msg = event.message;
-            const sender = (await msg.getSender()) as GramJSSender | undefined;
-            edits.emit(toMessage(msg, sender), msg.chatId?.toString() ?? "");
+            // The sender is already known; an edit doesn't change it
+            const message = toMessage(msg, msg.sender as GramJSSender | undefined);
+            edits.emit(message, msg.chatId?.toString() ?? "", extractReactions(msg.reactions));
           },
           new EditedMessage({}),
         );
@@ -343,18 +334,17 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
       if (!media?._message) return undefined;
       if (needsPreviewFrame(media)) {
         const frame = previewFrame(media._message);
-        if (!frame) throw new Error("No preview image to show for this one");
-        return (await client.downloadMedia(media._message, { thumb: frame })) as Buffer;
+        if (!frame) throw new Error("No preview image here. Open it in Telegram to watch it");
+        // By its type: GramJS can't match a progressive size passed as an
+        // object, and would fall back to downloading the whole video
+        return (await client.downloadMedia(media._message, { thumb: frame.type as never })) as Buffer;
       }
       return (await client.downloadMedia(media._message, {})) as Buffer;
     },
 
-    async markAsRead(chatId: string, maxMessageId?: number): Promise<boolean> {
-      try {
-        return await client.markAsRead(chatId, maxMessageId ? [maxMessageId] : undefined);
-      } catch {
-        return false;
-      }
+    // Read sync retries a failure
+    markAsRead(chatId: string, maxMessageId?: number): Promise<boolean> {
+      return client.markAsRead(chatId, maxMessageId ? [maxMessageId] : undefined);
     },
 
     async sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean> {

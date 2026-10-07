@@ -118,7 +118,7 @@ function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
     time: `[${formatTime(msg.timestamp)}]\u00A0`,
     reply: msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}:\u00A0` : "",
     name: `${keepTogether(senderName)}:`,
-    forward: msg.forwardedFrom ? ` ↪\u00A0from\u00A0${keepTogether(msg.forwardedFrom)}:` : "",
+    forward: msg.forwardedFrom ? ` ↪\u00A0from ${msg.forwardedFrom}:` : "",
     media: msg.media ? ` ${formatMediaMetadata(msg.media)}` : "",
     text: ` ${text}`,
     viewHint: isSelected && hasViewableMedia(msg) ? " [Press enter to view]" : "",

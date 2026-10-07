@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { Api } from "telegram";
 import { returnBigInt as bigInt } from "telegram/Helpers";
-import { extractMedia, extractReactions, getReplyToMsgId, toMessage } from "./telegramMessage";
+import { extractMedia, extractReactions, getReplyToMsgId, previewFrame, toMessage } from "./telegramMessage";
 
 const message = (fields: Partial<ConstructorParameters<typeof Api.Message>[0]>) =>
   new Api.Message({
@@ -12,7 +12,7 @@ const message = (fields: Partial<ConstructorParameters<typeof Api.Message>[0]>) 
     ...fields,
   });
 
-const document = (mimeType: string, attributes: Api.TypeDocumentAttribute[]) =>
+const document = (mimeType: string, attributes: Api.TypeDocumentAttribute[], thumbs?: Api.TypePhotoSize[]) =>
   new Api.MessageMediaDocument({
     document: new Api.Document({
       id: bigInt(1),
@@ -23,6 +23,7 @@ const document = (mimeType: string, attributes: Api.TypeDocumentAttribute[]) =>
       size: bigInt(2048),
       dcId: 2,
       attributes,
+      thumbs,
     }),
   });
 
@@ -76,6 +77,28 @@ describe("extractMedia", () => {
 
   it("leaves link previews to the text", () => {
     expect(extractMedia(message({ media: new Api.MessageMediaWebPage({ webpage: new Api.WebPageEmpty({ id: bigInt(1) }) }) }))).toBeUndefined();
+  });
+});
+
+describe("previewFrame", () => {
+  const video = new Api.DocumentAttributeVideo({ duration: 5, w: 1280, h: 720 });
+  const size = (type: string, w: number) => new Api.PhotoSize({ type, w, h: w, size: w * 10 });
+  const stripped = new Api.PhotoStrippedSize({ type: "i", bytes: Buffer.alloc(4) });
+
+  it("prefers a plain size, which downloads just the image", () => {
+    const progressive = new Api.PhotoSizeProgressive({ type: "y", w: 1280, h: 1280, sizes: [1000, 5000] });
+    expect(previewFrame(message({ media: document("video/mp4", [video], [progressive, size("m", 320)]) }))).toMatchObject({ type: "m" });
+    expect(previewFrame(message({ media: document("video/mp4", [video], [stripped, progressive]) }))).toBe(progressive);
+  });
+
+  it("picks the largest still image", () => {
+    const frame = previewFrame(message({ media: document("video/mp4", [video], [stripped, size("m", 320), size("x", 800), size("s", 90)]) }));
+    expect(frame).toMatchObject({ type: "x" });
+  });
+
+  it("falls back to the blurry inline one, or nothing", () => {
+    expect(previewFrame(message({ media: document("video/mp4", [video], [stripped]) }))).toBe(stripped);
+    expect(previewFrame(message({ media: document("video/mp4", [video]) }))).toBeUndefined();
   });
 });
 
