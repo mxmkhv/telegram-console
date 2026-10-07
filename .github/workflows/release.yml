@@ -4,10 +4,14 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  # Retries a failed publish from main
+  workflow_dispatch:
 
 jobs:
   publish:
-    if: github.event.pull_request.merged == true && (startsWith(github.event.pull_request.head.ref, 'release/') || startsWith(github.event.pull_request.head.ref, 'claude/release-'))
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.pull_request.merged == true && (startsWith(github.event.pull_request.head.ref, 'release/') || startsWith(github.event.pull_request.head.ref, 'claude/release-')))
     runs-on: ubuntu-latest
 
     permissions:
@@ -23,12 +27,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 20 bundles an older one
+      # Trusted publishing (OIDC) needs npm >= 11.5.1. Pinned to a major, since npm@latest
+      # can require a newer Node than this job runs (npm 12 broke the 0.6.0 release)
       - name: Update npm
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
