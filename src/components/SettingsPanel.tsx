@@ -33,7 +33,7 @@ interface Option {
   detail: string;
 }
 
-/** Choices with a line of detail under each */
+/** Choices, with a line of detail under the selected one */
 function OptionList<T extends Option>({
   options,
   selectedIndex,
@@ -48,16 +48,18 @@ function OptionList<T extends Option>({
     const isSelected = selectedIndex === i;
     return (
       <React.Fragment key={option.label}>
-        <Box flexDirection="row" marginTop={i === 0 ? 0 : 1}>
+        <Box flexDirection="row">
           <Text color={isSelected ? "cyan" : undefined}>{isSelected ? `${skin.glyphs.caret} ` : "  "}</Text>
           <Text bold color={isSelected ? "cyan" : undefined}>
             {option.label}
           </Text>
           {isCurrent(option) && <Text dimColor> (current)</Text>}
         </Box>
-        <Box marginLeft={4}>
-          <Text dimColor>{option.detail}</Text>
-        </Box>
+        {isSelected && (
+          <Box marginLeft={4}>
+            <Text dimColor>{option.detail}</Text>
+          </Box>
+        )}
       </React.Fragment>
     );
   });
@@ -133,111 +135,122 @@ function SettingsPanelInner() {
       paddingY={skin.spacing.panelPaddingY}
       flexGrow={1}
     >
-      <Text bold color="cyan">
-        Settings
-      </Text>
-      <Text> </Text>
+      {/* On short terminals the tab is cut off rather than pushing the status bar out */}
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
+        <Box flexDirection="column" flexShrink={0}>
+          <Text bold color="cyan">
+            Settings
+          </Text>
 
-      {/* Tab bar: on narrow screens, whole tabs wrap to a second row */}
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-        {TABS.map((tab) => {
-          const isActiveTab = activeTab === tab.key;
-          return (
-            <Text key={tab.key} bold={isActiveTab} color={isActiveTab ? "cyan" : undefined} dimColor={!isActiveTab}>
-              {isActiveTab ? `[ ${tab.label} ]` : `  ${tab.label}  `}
-            </Text>
-          );
-        })}
-      </Box>
-      <Text> </Text>
-
-      {activeTab === "layout" ? (
-        <>
-          {/* Classic Option */}
-          <Box flexDirection="row">
-            <Text color={layoutIndex === 0 ? "cyan" : undefined}>
-              {layoutIndex === 0 ? `${skin.glyphs.caret} ` : "  "}
-            </Text>
-            <Text bold color={layoutIndex === 0 ? "cyan" : undefined}>
-              Classic
-            </Text>
-            {state.messageLayout === "classic" && (
-              <Text dimColor> (current)</Text>
-            )}
+          {/* Tab bar: on narrow screens, whole tabs wrap to a second row */}
+          <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+            {TABS.map((tab) => {
+              const isActiveTab = activeTab === tab.key;
+              return (
+                <Text key={tab.key} bold={isActiveTab} color={isActiveTab ? "cyan" : undefined} dimColor={!isActiveTab}>
+                  {isActiveTab ? `[ ${tab.label} ]` : `  ${tab.label}  `}
+                </Text>
+              );
+            })}
           </Box>
-          <Box flexDirection="column" marginLeft={4} marginY={1}>
-            <Text><Text dimColor>[14:32] </Text><Text color="green">Alice:</Text> Hello!</Text>
-            <Text><Text dimColor>[14:33] </Text><Text color="blue">You:</Text> Hi there</Text>
-          </Box>
-
-          {/* Bubble Option */}
-          <Box flexDirection="row" marginTop={1}>
-            <Text color={layoutIndex === 1 ? "cyan" : undefined}>
-              {layoutIndex === 1 ? `${skin.glyphs.caret} ` : "  "}
-            </Text>
-            <Text bold color={layoutIndex === 1 ? "cyan" : undefined}>
-              Bubble
-            </Text>
-            {state.messageLayout === "bubble" && (
-              <Text dimColor> (current)</Text>
-            )}
-          </Box>
-          <Box flexDirection="column" marginLeft={4} marginY={1}>
-            <Text><Text color="green">Alice</Text></Text>
-            <Text>Hello! <Text dimColor>[14:32]</Text></Text>
-            <Text>                    <Text color="blue">Hi there</Text> <Text dimColor>[14:33]</Text></Text>
-          </Box>
-        </>
-      ) : activeTab === "typing" ? (
-        <OptionList
-          options={EMOTICON_OPTIONS}
-          selectedIndex={emoticonIndex}
-          isCurrent={(option) => option.convert === state.convertEmoticons}
-        />
-      ) : activeTab === "notifications" ? (
-        <>
-          <OptionList
-            options={NOTIFICATION_OPTIONS}
-            selectedIndex={notifyIndex}
-            isCurrent={(option) => option.mode === state.notifications}
-          />
           <Text> </Text>
-          <Text dimColor>Muted chats and the open chat never alert.</Text>
-          {!detectDesktopNotify(process.env) && (
-            <Text dimColor>No desktop notifications in this terminal.</Text>
-          )}
-        </>
-      ) : (
-        <>
-          {SKIN_NAMES.map((name, i) => {
-            const isSelected = skinIndex === i;
-            const previewSkin = getSkin(name);
-            return (
-              <React.Fragment key={name}>
-                <Box flexDirection="row" marginTop={i === 0 ? 0 : 1}>
-                  <Text color={isSelected ? "cyan" : undefined}>
-                    {isSelected ? `${skin.glyphs.caret} ` : "  "}
-                  </Text>
-                  <Text bold color={isSelected ? "cyan" : undefined}>
-                    {previewSkin.label}
-                  </Text>
-                  {state.skin === name && <Text dimColor> (current)</Text>}
-                </Box>
-                {/* Uses raw Ink primitives (not the themed Box/Text) so the swatch always
-                    shows this skin's true accent color, regardless of which skin is active. */}
-                <InkBox marginLeft={4} marginY={1} borderStyle="round" borderColor={previewSkin.colorMap.cyan ?? "cyan"} paddingX={1}>
-                  <InkText bold color={previewSkin.colorMap.cyan ?? "cyan"}>
-                    {previewSkin.glyphs.caret} Preview
-                  </InkText>
-                </InkBox>
-              </React.Fragment>
-            );
-          })}
-        </>
-      )}
 
-      <Text> </Text>
-      <Text dimColor>←→ Switch tab · ↑↓ Navigate · Enter to select · Esc to go back</Text>
+          {activeTab === "layout" ? (
+            <>
+              {/* Classic Option */}
+              <Box flexDirection="row">
+                <Text color={layoutIndex === 0 ? "cyan" : undefined}>
+                  {layoutIndex === 0 ? `${skin.glyphs.caret} ` : "  "}
+                </Text>
+                <Text bold color={layoutIndex === 0 ? "cyan" : undefined}>
+                  Classic
+                </Text>
+                {state.messageLayout === "classic" && (
+                  <Text dimColor> (current)</Text>
+                )}
+              </Box>
+              {layoutIndex === 0 && (
+                <Box flexDirection="column" marginLeft={4}>
+                  <Text><Text dimColor>[14:32] </Text><Text color="green">Alice:</Text> Hello!</Text>
+                  <Text><Text dimColor>[14:33] </Text><Text color="blue">You:</Text> Hi there</Text>
+                </Box>
+              )}
+
+              {/* Bubble Option */}
+              <Box flexDirection="row">
+                <Text color={layoutIndex === 1 ? "cyan" : undefined}>
+                  {layoutIndex === 1 ? `${skin.glyphs.caret} ` : "  "}
+                </Text>
+                <Text bold color={layoutIndex === 1 ? "cyan" : undefined}>
+                  Bubble
+                </Text>
+                {state.messageLayout === "bubble" && (
+                  <Text dimColor> (current)</Text>
+                )}
+              </Box>
+              {layoutIndex === 1 && (
+                <Box flexDirection="column" marginLeft={4}>
+                  <Text><Text color="green">Alice</Text></Text>
+                  <Text>Hello! <Text dimColor>[14:32]</Text></Text>
+                  <Text>                    <Text color="blue">Hi there</Text> <Text dimColor>[14:33]</Text></Text>
+                </Box>
+              )}
+            </>
+          ) : activeTab === "typing" ? (
+            <OptionList
+              options={EMOTICON_OPTIONS}
+              selectedIndex={emoticonIndex}
+              isCurrent={(option) => option.convert === state.convertEmoticons}
+            />
+          ) : activeTab === "notifications" ? (
+            <>
+              <OptionList
+                options={NOTIFICATION_OPTIONS}
+                selectedIndex={notifyIndex}
+                isCurrent={(option) => option.mode === state.notifications}
+              />
+              <Text> </Text>
+              <Text dimColor>Muted chats and the open chat never alert.</Text>
+              {!detectDesktopNotify(process.env) && (
+                <Text dimColor>No desktop notifications in this terminal.</Text>
+              )}
+            </>
+          ) : (
+            <>
+              {SKIN_NAMES.map((name, i) => {
+                const isSelected = skinIndex === i;
+                const previewSkin = getSkin(name);
+                return (
+                  <React.Fragment key={name}>
+                    <Box flexDirection="row">
+                      <Text color={isSelected ? "cyan" : undefined}>
+                        {isSelected ? `${skin.glyphs.caret} ` : "  "}
+                      </Text>
+                      <Text bold color={isSelected ? "cyan" : undefined}>
+                        {previewSkin.label}
+                      </Text>
+                      {state.skin === name && <Text dimColor> (current)</Text>}
+                    </Box>
+                    {/* Uses raw Ink primitives (not the themed Box/Text) so the swatch always
+                        shows this skin's true accent color, regardless of which skin is active. */}
+                    {isSelected && (
+                      <InkBox marginLeft={4} borderStyle="round" borderColor={previewSkin.colorMap.cyan ?? "cyan"} paddingX={1}>
+                        <InkText bold color={previewSkin.colorMap.cyan ?? "cyan"}>
+                          {previewSkin.glyphs.caret} Preview
+                        </InkText>
+                      </InkBox>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </>
+          )}
+        </Box>
+      </Box>
+
+      <Box flexShrink={0} marginTop={1}>
+        <Text dimColor>←→ Switch tab · ↑↓ choose · Enter select · Esc back</Text>
+      </Box>
     </Box>
   );
 }

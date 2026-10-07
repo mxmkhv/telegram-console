@@ -53,6 +53,8 @@ function StatusBarInner({ connectionState, focusedPanel, width }: StatusBarProps
         : { borderStyle: "round" as const })}
       paddingX={1}
       justifyContent="space-between"
+      // Keeps its rows when what's above is too tall
+      flexShrink={0}
     >
       <Text wrap="truncate">
         [

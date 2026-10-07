@@ -34,6 +34,8 @@ function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
         : { borderStyle: "round" as const, borderColor: isFocused ? "cyan" : "blue" })}
       paddingX={1}
       justifyContent="space-between"
+      // Keeps its rows when what's below is too tall
+      flexShrink={0}
     >
       {/* One row always: on narrow screens the title gives way to the buttons */}
       <Text bold color="cyan" wrap="truncate">
