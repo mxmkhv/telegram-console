@@ -19,6 +19,13 @@ describe("SKINS", () => {
     expect(SKINS.default.colorMap).toEqual({});
   });
 
+  // The Kitty logo tints its image with the accent; tintAlphaMask needs #rrggbb.
+  it("every skin color is a #rrggbb hex value", () => {
+    for (const skin of Object.values(SKINS)) {
+      for (const color of Object.values(skin.colorMap)) expect(color).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
   it("claudeCode skin remaps the accent colors", () => {
     expect(SKINS.claudeCode.colorMap.cyan).toBeDefined();
     expect(SKINS.claudeCode.colorMap.blue).toBeDefined();

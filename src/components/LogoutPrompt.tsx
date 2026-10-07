@@ -10,8 +10,19 @@ interface LogoutPromptProps {
 
 function LogoutPromptInner({ onConfirm, onCancel }: LogoutPromptProps) {
   const [selected, setSelected] = useState<LogoutMode>("session");
+  // Full reset deletes credentials and settings, so it takes an explicit "y"
+  const [confirmingFullReset, setConfirmingFullReset] = useState(false);
 
   useInput((input, key) => {
+    if (confirmingFullReset) {
+      if (input === "y" || input === "Y") {
+        onConfirm("full");
+      } else if (key.escape) {
+        setConfirmingFullReset(false);
+      }
+      return;
+    }
+
     if (key.escape) {
       onCancel();
       return;
@@ -28,10 +39,38 @@ function LogoutPromptInner({ onConfirm, onCancel }: LogoutPromptProps) {
     }
 
     if (key.return) {
-      onConfirm(selected);
+      if (selected === "full") {
+        setConfirmingFullReset(true);
+      } else {
+        onConfirm(selected);
+      }
       return;
     }
   });
+
+  if (confirmingFullReset) {
+    return (
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        borderStyle="single"
+        borderColor="red"
+        paddingX={4}
+        paddingY={1}
+      >
+        <Text bold color="red">
+          Full reset
+        </Text>
+        <Text> </Text>
+        <Text>This deletes your session, API credentials and settings.</Text>
+        <Text>You'll need to run setup again.</Text>
+        <Text> </Text>
+        <Text>
+          Press <Text bold color="red">y</Text> to reset · Esc to go back
+        </Text>
+      </Box>
+    );
+  }
 
   return (
     <Box

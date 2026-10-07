@@ -2,24 +2,24 @@
 
 exports[`StatusBar renders correctly when connected 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connected] CHATLIST                        [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
+│ [Connected] Chats                                                           ↑↓ move · Enter open │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`StatusBar renders correctly when connecting 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connecting...] CHATLIST                    [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
+│ [Connecting...] Chats                                                       ↑↓ move · Enter open │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`StatusBar renders correctly when disconnected 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Disconnected] CHATLIST                     [↑↓: Navigate] [Enter: Open] [Tab: Next] [Esc: Back] │
+│ [Disconnected] Chats                                                        ↑↓ move · Enter open │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;
 
 exports[`StatusBar renders with different focused panels 1`] = `
 "╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ [Connected] MESSAGES         [R: React] [Shift+R: Reply] [Enter: Message] [←: Chats] [Esc: Back] │
+│ [Connected] Messages                                                 r react · R reply · ← chats │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
 `;

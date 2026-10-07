@@ -3,6 +3,9 @@ export const FLASH_CONFIG = {
   onDuration: 200,
   offDuration: 150,
 
+  // Background behind a new or jumped-to message
+  messageColor: "gray",
+
   // Repetitions
   chatFlashCount: 3,
   messageFlashCount: 1,

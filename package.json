@@ -1,6 +1,6 @@
 {
   "name": "telegram-console",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "A terminal-based Telegram client",
   "author": "Max Kehayov",
@@ -34,10 +34,11 @@
   },
   "scripts": {
     "dev": "bun run src/index.tsx",
-    "build": "bun build src/index.tsx --outdir dist --target node --minify",
+    "build": "bun run scripts/build.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
+    "docs:keymap": "bun run scripts/sync-keymap-docs.ts",
     "prepublishOnly": "bun run build",
     "release:patch": "bun run scripts/release.ts patch",
     "release:minor": "bun run scripts/release.ts minor",
@@ -61,10 +62,12 @@
     "qrcode-terminal": "^0.12.0",
     "react": "^19.2.3",
     "react-devtools-core": "^7.0.1",
+    "string-width": "7.2.0",
     "supports-terminal-graphics": "^0.1.0",
     "telegram": "^2.26.22",
     "terminal-image": "^4.2.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.53.1"
+    "typescript-eslint": "^8.53.1",
+    "wrap-ansi": "9.0.2"
   }
 }

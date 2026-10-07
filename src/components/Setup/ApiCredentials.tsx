@@ -4,30 +4,39 @@ import TextInput from "ink-text-input";
 
 interface ApiCredentialsProps {
   onSubmit: (apiId: string, apiHash: string) => void;
+  /** What was entered before, when coming back to fix it */
+  initialApiId?: string;
+  initialApiHash?: string;
 }
 
 type Step = "apiId" | "apiHash";
 
-export function ApiCredentials({ onSubmit }: ApiCredentialsProps) {
+export function ApiCredentials({ onSubmit, initialApiId = "", initialApiHash = "" }: ApiCredentialsProps) {
   const [step, setStep] = useState<Step>("apiId");
-  const [apiId, setApiId] = useState("");
-  const [apiHash, setApiHash] = useState("");
+  const [apiId, setApiId] = useState(initialApiId);
+  const [apiHash, setApiHash] = useState(initialApiHash);
+  const [error, setError] = useState<string | null>(null);
 
   const handleApiIdSubmit = (value: string) => {
     const trimmed = value.trim();
-    if (trimmed) {
-      setApiId(trimmed);
-      setStep("apiHash");
+    if (!/^\d+$/.test(trimmed)) {
+      setError("The API ID is a number, like 1234567");
+      return;
     }
+    setError(null);
+    setApiId(trimmed);
+    setStep("apiHash");
   };
 
   const handleApiHashSubmit = (value: string) => {
-    const trimmedHash = value.trim();
-    const trimmedId = apiId.trim();
-    if (trimmedHash && trimmedId) {
-      setApiHash(trimmedHash);
-      onSubmit(trimmedId, trimmedHash);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setError("Paste the API hash from https://my.telegram.org/apps");
+      return;
     }
+    setError(null);
+    setApiHash(trimmed);
+    onSubmit(apiId, trimmed);
   };
 
   return (
@@ -67,6 +76,7 @@ export function ApiCredentials({ onSubmit }: ApiCredentialsProps) {
       )}
 
       <Text></Text>
+      {error && <Text color="red">{error}</Text>}
       <Text dimColor>[Press Enter to continue]</Text>
     </Box>
   );

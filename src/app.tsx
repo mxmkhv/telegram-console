@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { unlink } from "node:fs/promises";
 import { useInput, useApp as useInkApp } from "ink";
 import { Box, Text } from "./components/ui";
@@ -7,34 +7,74 @@ import { SkinContext } from "./components/ui/SkinContext";
 import { getSkin } from "./config/skins";
 import { ShortcutsBar } from "./components/ShortcutsBar";
 import { AppProvider, useApp } from "./state/context";
+import { isOverlayOpen } from "./state/reducer";
 import { ChatList } from "./components/ChatList";
 import { ChatStrip } from "./components/ChatStrip";
 import { MessageView } from "./components/MessageView";
 import { isNarrowLayout, getChatListWidth, getMessageViewWidth } from "./layout";
 import { InputBar } from "./components/InputBar";
 import { StatusBar } from "./components/StatusBar";
-import { Setup } from "./components/Setup";
+import { Setup, type Credentials } from "./components/Setup";
 import { HeaderBar } from "./components/HeaderBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
+import { ChatSwitcher } from "./components/ChatSwitcher";
+import { HelpOverlay } from "./components/HelpOverlay";
 import { MediaPanel } from "./components/MediaPanel";
 import { BlankScreen } from "./components/BlankScreen";
+import { createReadSync } from "./services/readSync";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
+import { NoticeLine } from "./components/NoticeLine";
+import { describeError } from "./utils/describeError";
+import { withTimeout } from "./utils/withTimeout";
+
+const DELIVERY_TIMEOUT_MS = 30_000;
+// A stalled load turns into the error state, which Ctrl+R can retry
+const LOAD_TIMEOUT_MS = 30_000;
+const MESSAGE_PAGE_SIZE = 50;
+const DELIVERY_TIMEOUT_REASON = "no response from Telegram";
+import { DEFAULT_SETTINGS, hasConfig, loadConfig, loadConfigWithEnvOverrides, saveConfig, updateConfig, deleteSession, deleteAllData, loadSession, saveSession } from "./config";
 import { useTerminalSize } from "./hooks/useTerminalSize";
+import { useTerminalNotifications } from "./hooks/useTerminalNotifications";
 import { createTelegramService } from "./services/telegram";
-import { createMockTelegramService } from "./services/telegram.mock";
+import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, FocusedPanel, LoadStatus, Message } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
   onLogout: (mode: LogoutMode) => void;
   onToggleNoColor: () => void;
+  /** Writes the bell, window title and notification escapes; tests leave it out */
+  writeToTerminal?: (data: string) => void;
 }
 
-export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppProps) {
+export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTerminal }: MainAppProps) {
   const { state, dispatch } = useApp();
+
+  // The open chat is on screen unless something covers its messages
+  const messagesCovered =
+    state.currentView !== "chat" || state.mediaPanel.isOpen || state.showChatSwitcher || state.showHelp || state.showLogoutPrompt;
+  const { newWhileHidden } = useTerminalNotifications({
+    write: writeToTerminal,
+    telegramService,
+    chats: state.chats,
+    viewingChatId: messagesCovered ? null : state.selectedChatId,
+    hidden: state.isHidden,
+    mode: state.notifications,
+  });
+  // Up to the newest message shown in the open chat, while you can see it
+  const readSync = useMemo(
+    () => createReadSync((chatId, messageId) => telegramService.markAsRead(chatId, messageId)),
+    [telegramService],
+  );
+  useEffect(() => () => readSync.close(), [readSync]);
+  const [readPosition, setReadPosition] = useState<{ chatId: string; messageId: number } | null>(null);
+  const handleSeen = useCallback((chatId: string, messageId: number) => setReadPosition({ chatId, messageId }), []);
+  useEffect(() => {
+    if (readPosition && !messagesCovered && !state.isHidden) readSync.seen(readPosition.chatId, readPosition.messageId);
+  }, [readPosition, messagesCovered, state.isHidden, readSync]);
+
   const { exit } = useInkApp();
   // Track highlighted chat by ID (not index) so it follows when chats reorder
   const [highlightedChatId, setHighlightedChatId] = useState<string | null>(null);
@@ -94,15 +134,61 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [telegramService]
   );
 
-  // Initialize connection and load chats
+  // Latest state for async callbacks that resolve after later renders
+  const stateRef = useRef(state);
   useEffect(() => {
-    const init = async () => {
-      await telegramService.connect();
-      const chats = await telegramService.getChats();
-      dispatch({ type: "SET_CHATS", payload: chats });
-    };
-    init();
+    stateRef.current = state;
+  });
 
+  // Messages sent from here get a negative local id until Telegram assigns one
+  const nextLocalId = useRef(-1);
+
+  const showError = useCallback(
+    (text: string, sticky?: boolean) => {
+      dispatch({ type: "SHOW_NOTICE", payload: { kind: "error", text, sticky } });
+    },
+    [dispatch]
+  );
+
+  const handleNoticeExpire = useCallback(
+    (id: number) => dispatch({ type: "CLEAR_NOTICE", payload: { id } }),
+    [dispatch]
+  );
+
+  // Initialize connection and load chats. Bumping connectAttempt retries.
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const [initFailed, setInitFailed] = useState(false);
+  const [chatsLoaded, setChatsLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const init = async () => {
+      let step = "connect to Telegram";
+      try {
+        await telegramService.connect();
+        step = "load your chats";
+        const chats = await telegramService.getChats();
+        if (cancelled) return;
+        dispatch({ type: "SET_CHATS", payload: chats });
+        setChatsLoaded(true);
+      } catch (err) {
+        if (cancelled) return;
+        setInitFailed(true);
+        showError(`Couldn't ${step}: press Ctrl+R to retry (${describeError(err)})`, true);
+      }
+    };
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [telegramService, connectAttempt, dispatch, showError]);
+
+  const retryInit = useCallback(() => {
+    setInitFailed(false);
+    dispatch({ type: "CLEAR_NOTICE" });
+    setConnectAttempt((n) => n + 1);
+  }, [dispatch]);
+
+  useEffect(() => {
     const unsubConnection = telegramService.onConnectionStateChange((connectionState) => {
       dispatch({ type: "SET_CONNECTION_STATE", payload: connectionState });
     });
@@ -115,38 +201,120 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       dispatch({ type: "SET_TYPING", payload: { chatId, isTyping } });
     });
 
+    const unsubEdits = telegramService.onMessageEdited((message, chatId, reactions) => {
+      dispatch({ type: "MESSAGE_EDITED", payload: { chatId, message, reactions } });
+    });
+    const unsubDeletes = telegramService.onMessagesDeleted((messageIds, chatId) => {
+      dispatch({ type: "MESSAGES_DELETED", payload: { chatId, messageIds } });
+    });
+    const unsubReactions = telegramService.onReactionsChanged((chatId, messageId, reactions) => {
+      dispatch({ type: "SET_REACTIONS", payload: { chatId, messageId, reactions } });
+    });
+
     return () => {
       unsubConnection();
       unsubMessages();
       unsubTyping();
+      unsubEdits();
+      unsubDeletes();
+      unsubReactions();
     };
   }, [telegramService, dispatch]);
 
-  // Load messages when chat is selected and mark as read
+  // Load messages when chat is selected and mark as read. Bumping loadAttempt retries.
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadFailedChatId, setLoadFailedChatId] = useState<string | null>(null);
   useEffect(() => {
     if (!state.selectedChatId) return;
 
     const chatId = state.selectedChatId;
+    let cancelled = false;
+    setLoadFailedChatId(null);
     const loadMessages = async () => {
-      const messages = await telegramService.getMessages(chatId);
+      let messages: Message[];
+      try {
+        messages = await withTimeout(telegramService.getMessages(chatId), LOAD_TIMEOUT_MS, "no response from Telegram");
+      } catch (err) {
+        if (cancelled) return;
+        const title = stateRef.current.chats.find((c) => c.id === chatId)?.title ?? "this chat";
+        setLoadFailedChatId(chatId);
+        showError(`Couldn't load ${title}: press Ctrl+R to retry (${describeError(err)})`);
+        return;
+      }
+      if (cancelled) return;
+      // Read sync marks them read once they're on screen
       dispatch({
         type: "SET_MESSAGES",
         payload: { chatId, messages },
       });
-
-      // Mark as read in parallel (fire-and-forget, doesn't block UI)
-      if (messages.length > 0) {
-        const lastMessageId = messages.at(-1)!.id;
-        telegramService.markAsRead(chatId, lastMessageId).then((success) => {
-          if (success) {
-            dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
-          }
-        });
-      }
     };
 
-    loadMessages();
-  }, [state.selectedChatId, telegramService, dispatch]);
+    void loadMessages();
+    return () => {
+      cancelled = true;
+    };
+  }, [state.selectedChatId, loadAttempt, telegramService, dispatch, showError]);
+
+  const messagesStatus: LoadStatus = !state.selectedChatId
+    ? "ready"
+    : loadFailedChatId === state.selectedChatId
+      ? "error"
+      : state.messages[state.selectedChatId] === undefined
+        ? "loading"
+        : "ready";
+  const chatsStatus: LoadStatus = initFailed ? "error" : chatsLoaded ? "ready" : "loading";
+
+
+  // Messages sent while the connection was down never arrive as updates, so
+  // reload the chat list and the open chat once it's back. Ctrl+R retries.
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const refreshAfterReconnect = useCallback(() => {
+    setRefreshFailed(false);
+    const failed = (what: string) => (err: unknown) => {
+      setRefreshFailed(true);
+      showError(`Reconnected, but couldn't refresh ${what}: press Ctrl+R to retry (${describeError(err)})`, true);
+    };
+    telegramService.getChats().then((chats) => {
+      // The open chat was read here, whatever the server counted meanwhile
+      const openChatId = stateRef.current.selectedChatId;
+      dispatch({ type: "SET_CHATS", payload: chats.map((c) => (c.id === openChatId ? { ...c, unreadCount: 0 } : c)) });
+    }, failed("your chats"));
+
+    // The reducer merges by id against the list as it is then, so live
+    // messages that land meanwhile can't hide the missed ones
+    const chatId = stateRef.current.selectedChatId;
+    if (!chatId) return;
+    telegramService.getMessages(chatId, MESSAGE_PAGE_SIZE).then((page) => {
+      dispatch({ type: "MERGE_MESSAGES", payload: { chatId, messages: page, pageFull: page.length >= MESSAGE_PAGE_SIZE } });
+    }, failed("this chat"));
+  }, [telegramService, dispatch, showError]);
+
+  const connectionDropped = useRef(false);
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    if (state.connectionState !== "connected") {
+      connectionDropped.current = true;
+      return;
+    }
+    if (!connectionDropped.current) return;
+    connectionDropped.current = false;
+    refreshAfterReconnect();
+  }, [state.connectionState, chatsLoaded, refreshAfterReconnect]);
+
+  // Ctrl+R retries whatever failed to load
+  const canRetry = initFailed || refreshFailed || messagesStatus === "error";
+  const retry = useCallback(() => {
+    if (initFailed) {
+      retryInit();
+      return;
+    }
+    dispatch({ type: "CLEAR_NOTICE" });
+    if (refreshFailed) {
+      refreshAfterReconnect();
+      return;
+    }
+    setLoadAttempt((n) => n + 1);
+  }, [initFailed, refreshFailed, retryInit, refreshAfterReconnect, dispatch]);
 
   // Focus media panel when it opens
   useEffect(() => {
@@ -163,21 +331,107 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [dispatch]
   );
 
-  const handleSendMessage = useCallback(
-    async (text: string, chatId: string) => {
-      const replyToMsgId = state.replyingToMessage?.id;
-      const replyToSenderName = state.replyingToMessage?.senderName;
-      const message = await telegramService.sendMessage(chatId, text, replyToMsgId, replyToSenderName);
-      dispatch({
-        type: "ADD_MESSAGE",
-        payload: { chatId, message },
-      });
-      // Clear reply state after sending
-      if (replyToMsgId) {
-        dispatch({ type: "SET_REPLYING_TO", payload: null });
+  const openChatSwitcher = useCallback(() => {
+    dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: true });
+  }, [dispatch]);
+
+  const closeChatSwitcher = useCallback(() => {
+    dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: false });
+  }, [dispatch]);
+
+  const closeHelp = useCallback(() => {
+    dispatch({ type: "SET_SHOW_HELP", payload: false });
+  }, [dispatch]);
+
+  const handleSwitchToChat = useCallback(
+    (chatId: string) => {
+      dispatch({ type: "SET_SHOW_CHAT_SWITCHER", payload: false });
+      setHighlightedChatId(chatId);
+      handleSelectChat(chatId);
+    },
+    [dispatch, handleSelectChat]
+  );
+
+  // Sends the local message and swaps in Telegram's copy once it's accepted
+  const deliverSend = useCallback(
+    async (chatId: string, local: Message) => {
+      try {
+        const message = await withTimeout(
+          telegramService.sendMessage(chatId, local.text, local.replyToMsgId, local.replyToSenderName),
+          DELIVERY_TIMEOUT_MS,
+          DELIVERY_TIMEOUT_REASON
+        );
+        dispatch({ type: "CONFIRM_MESSAGE", payload: { chatId, localId: local.id, message } });
+      } catch (err) {
+        dispatch({
+          type: "SET_DELIVERY",
+          payload: { chatId, messageId: local.id, text: local.text, delivery: { action: "send", status: "failed" } },
+        });
+        showError(`Message not sent: Esc, then Enter on it to retry or x to discard (${describeError(err)})`);
       }
     },
-    [telegramService, dispatch, state.replyingToMessage]
+    [telegramService, dispatch, showError]
+  );
+
+  const deliverEdit = useCallback(
+    async (chatId: string, messageId: number, text: string, originalText: string) => {
+      try {
+        await withTimeout(
+          telegramService.editMessage(chatId, messageId, text),
+          DELIVERY_TIMEOUT_MS,
+          DELIVERY_TIMEOUT_REASON
+        );
+        dispatch({ type: "SET_DELIVERY", payload: { chatId, messageId, text, delivery: undefined } });
+      } catch (err) {
+        dispatch({
+          type: "SET_DELIVERY",
+          payload: { chatId, messageId, text, delivery: { action: "edit", status: "failed", originalText } },
+        });
+        showError(`Edit not saved: Esc, then Enter on it to retry or x to undo (${describeError(err)})`);
+      }
+    },
+    [telegramService, dispatch, showError]
+  );
+
+  // Shows the message right away as pending; failure keeps it in the list
+  // marked as not sent, so typed text is never lost.
+  const handleSendMessage = useCallback(
+    (text: string, chatId: string) => {
+      // No reply clear here: InputBar cancels it on Enter
+      const replyTo = state.replyingToMessage;
+      const local: Message = {
+        id: nextLocalId.current--,
+        senderId: "me",
+        senderName: "You",
+        text,
+        timestamp: new Date(),
+        isOutgoing: true,
+        replyToMsgId: replyTo?.id,
+        replyToSenderName: replyTo?.senderName,
+        delivery: { action: "send", status: "pending" },
+      };
+      dispatch({ type: "ADD_MESSAGE", payload: { chatId, message: local } });
+      void deliverSend(chatId, local);
+    },
+    [dispatch, deliverSend, state.replyingToMessage]
+  );
+
+  const handleRetryDelivery = useCallback(
+    (chatId: string, message: Message) => {
+      const { delivery } = message;
+      if (delivery?.status !== "failed") return;
+      dispatch({ type: "CLEAR_NOTICE" });
+      dispatch({
+        type: "SET_DELIVERY",
+        payload: { chatId, messageId: message.id, text: message.text, delivery: { ...delivery, status: "pending" } },
+      });
+      if (delivery.action === "send") {
+        void deliverSend(chatId, message);
+      } else {
+        void deliverEdit(chatId, message.id, message.text, delivery.originalText);
+      }
+    },
+    [dispatch, deliverSend, deliverEdit]
   );
 
   const handleSendImage = useCallback(
@@ -190,8 +444,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         const message = await telegramService.sendImage(chatId, path);
         dispatch({ type: "ADD_MESSAGE", payload: { chatId, message } });
         return { ok: true };
-      } catch {
-        return { ok: false, error: "Failed to send image" };
+      } catch (err) {
+        return { ok: false, error: `Image not sent (${describeError(err)})` };
       } finally {
         if (isTemp) {
           unlink(path).catch(() => {});
@@ -201,19 +455,29 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     [telegramService, dispatch]
   );
 
+  // Applies the edit right away; failure keeps the new text marked as not saved
   const handleEditMessage = useCallback(
-    async (text: string, chatId: string, messageId: number) => {
-      try {
-        await telegramService.editMessage(chatId, messageId, text);
-        dispatch({
-          type: "UPDATE_MESSAGE",
-          payload: { chatId, messageId, newText: text },
-        });
-      } catch {
-        // Edit failed - could add error flash here
+    (text: string, chatId: string, messageId: number) => {
+      const message = stateRef.current.messages[chatId]?.find((m) => m.id === messageId);
+      if (!message) {
+        showError("Edit not saved: the message is no longer loaded. Reopen the chat and try again");
+        return;
       }
+      // Re-editing an unsaved edit keeps the text Telegram actually has
+      const originalText =
+        message.delivery?.action === "edit" ? message.delivery.originalText : message.text;
+      dispatch({
+        type: "UPDATE_MESSAGE",
+        payload: {
+          chatId,
+          messageId,
+          newText: text,
+          delivery: { action: "edit", status: "pending", originalText },
+        },
+      });
+      void deliverEdit(chatId, messageId, text, originalText);
     },
-    [telegramService, dispatch]
+    [dispatch, deliverEdit, showError]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -224,6 +488,13 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     dispatch({ type: "SET_EDITING_MESSAGE", payload: null });
   }, [dispatch]);
 
+  const handleSaveDraft = useCallback(
+    (chatId: string, draft: ChatDraft) => {
+      dispatch({ type: "SAVE_DRAFT", payload: { chatId, draft } });
+    },
+    [dispatch]
+  );
+
   // Calculate terminal dimensions and panel sizes
   const { columns: terminalWidth, rows: terminalRows } = useTerminalSize();
   const narrow = isNarrowLayout(terminalWidth);
@@ -231,8 +502,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
   // Dynamic height budget
   const isMinimal = state.uiMode === "minimal";
+  const overlayOpen = isOverlayOpen(state);
   const modeIndicatorVisible = !!(state.replyingToMessage || state.editingMessage);
-  const inputReserved = 3 + (modeIndicatorVisible ? 1 : 0);
+  // A long draft grows the input up to MAX_INPUT_ROWS, and the panels give way
+  const [inputRows, setInputRows] = useState(1);
+  const inputReserved = 2 + inputRows + (modeIndicatorVisible ? 1 : 0) + (state.notice ? 1 : 0);
   // panelDividers skins replace HeaderBar/StatusBar's round border (2 rows)
   // with a single 1-row rule, so each panel is 1 row shorter.
   const panelRows = getSkin(state.skin).panelDividers ? 2 : 3;
@@ -248,6 +522,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   );
   const panelHeight = bodyHeight;
 
+  // Tab cycles panels, Shift+Tab cycles back
+  const cycleFocus = (backwards: boolean) => {
+    const order: FocusedPanel[] = isMinimal ? ["chatList", "messages", "input"] : ["header", "chatList", "messages", "input"];
+    const current = order.indexOf(state.focusedPanel);
+    if (current < 0) return;
+    const next = order[(current + (backwards ? -1 : 1) + order.length) % order.length]!;
+    dispatch({ type: "SET_FOCUSED_PANEL", payload: next });
+  };
+
   // Panel navigation and global keys (disabled when input is focused to not interfere with TextInput)
   useInput(
     (input, key) => {
@@ -257,22 +540,28 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         return;
       }
 
-      // Media popup owns the keyboard (MediaPanel handles its own keys)
-      if (state.mediaPanel.isOpen) {
+      if (key.ctrl && input === "r" && canRetry) {
+        retry();
         return;
       }
 
-      // Tab cycles panels
+      // Overlays (settings, logout, reactions, media, switcher) handle their own keys
+      if (overlayOpen) {
+        return;
+      }
+
+      if ((key.ctrl && input === "k") || input === "/") {
+        openChatSwitcher();
+        return;
+      }
+
+      if (input === "?") {
+        dispatch({ type: "SET_SHOW_HELP", payload: true });
+        return;
+      }
+
       if (key.tab) {
-        if (state.focusedPanel === "header") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
-        } else if (state.focusedPanel === "chatList") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
-        } else if (state.focusedPanel === "messages") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
-        } else if (state.focusedPanel === "input") {
-          dispatch({ type: "SET_FOCUSED_PANEL", payload: isMinimal ? "chatList" : "header" });
-        }
+        cycleFocus(key.shift);
         return;
       }
 
@@ -283,10 +572,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         if (next === "minimal" && state.focusedPanel === "header") {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         }
-        const cfg = loadConfig();
-        if (cfg) {
-          saveConfig({ ...cfg, uiMode: next });
-        }
+        updateConfig({ uiMode: next });
         return;
       }
 
@@ -299,6 +585,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       // Toggle colors on/off (works from any panel except input)
       if (input === "c" || input === "C") {
         onToggleNoColor();
+        return;
+      }
+
+      if (input === "s" || input === "S") {
+        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
+        return;
+      }
+      if (input === "l" || input === "L") {
+        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
         return;
       }
 
@@ -318,9 +613,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
       // Escape handling - context-aware focus chain
       if (key.escape) {
-        if (state.currentView === "settings") {
-          dispatch({ type: "SET_CURRENT_VIEW", payload: "chat" });
-        } else if (state.focusedPanel === "messages") {
+        if (state.focusedPanel === "messages") {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
         } else if (state.focusedPanel === "chatList" && !isMinimal) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "header" });
@@ -328,27 +621,14 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
         // mediaPanel escape is handled in MediaPanel component
         return;
       }
-      if (input === "s" || input === "S") {
-        dispatch({ type: "SET_CURRENT_VIEW", payload: "settings" });
-        return;
-      }
-      if (input === "l" || input === "L") {
-        dispatch({ type: "SET_SHOW_LOGOUT_PROMPT", payload: true });
-        return;
-      }
 
-      // Panel-specific navigation (suppressed while Settings owns the keyboard,
-      // so its own arrow-key handling doesn't also move chat/message selection
-      // in the background)
-      if (state.currentView === "settings") {
-        return;
-      }
+      // Panel-specific navigation
       if (state.focusedPanel === "chatList") {
-        if (key.upArrow || (narrow && key.leftArrow)) {
+        if (key.upArrow || input === "k" || (narrow && key.leftArrow)) {
           const newIndex = Math.max(0, chatIndex - 1);
           const newChat = state.chats[newIndex];
           if (newChat) setHighlightedChatId(newChat.id);
-        } else if (key.downArrow || (narrow && key.rightArrow)) {
+        } else if (key.downArrow || input === "j" || (narrow && key.rightArrow)) {
           const newIndex = Math.min(state.chats.length - 1, chatIndex + 1);
           const newChat = state.chats[newIndex];
           if (newChat) setHighlightedChatId(newChat.id);
@@ -359,30 +639,27 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
         }
       } else if (state.focusedPanel === "messages") {
-        if (key.upArrow) {
-          setMessageIndex((i) => Math.max(0, i - 1));
-        } else if (key.downArrow) {
-          setMessageIndex((i) => Math.min(currentMessages.length - 1, i + 1));
-        } else if (key.leftArrow) {
+        if (key.leftArrow) {
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "chatList" });
-        } else if (key.return) {
-          // If at top and can load older, load them; otherwise go to input
-          if (canLoadOlder) {
-            loadOlderMessages();
-          } else {
-            dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
-          }
         }
+        // Moving the selection and Enter belong to MessageView, which knows the page size
       }
     },
     { isActive: state.focusedPanel !== "input" && !state.isHidden }
   );
 
-  // Escape to exit input mode (only active when input is focused)
+  // Leaving the input (only active when input is focused); the draft stays
   useInput(
-    (_input, key) => {
+    (input, key) => {
+      if (overlayOpen) return;
       if (key.escape) {
         dispatch({ type: "SET_FOCUSED_PANEL", payload: "messages" });
+      } else if (key.tab) {
+        cycleFocus(key.shift);
+      } else if (key.ctrl && input === "r" && canRetry) {
+        retry();
+      } else if (key.ctrl && input === "k") {
+        openChatSwitcher();
       }
     },
     { isActive: state.focusedPanel === "input" && !state.isHidden }
@@ -412,21 +689,48 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   );
 
   const handleStartEdit = useCallback(() => {
-    const lastOutgoing = [...currentMessages].reverse().find((m) => m.isOutgoing);
+    // Unsent messages have no server id to edit
+    const lastOutgoing = currentMessages.findLast((m) => m.isOutgoing && m.delivery?.action !== "send");
     if (lastOutgoing) {
       dispatch({ type: "SET_EDITING_MESSAGE", payload: lastOutgoing });
     }
   }, [currentMessages, dispatch]);
 
+  // Set while the selected message is taller than the panel and not read to
+  // its end. State, not a ref: MessageView reports after each render, so for
+  // an arrival this render still holds the position from before it, which a
+  // new "↓ 1 more" row can't have changed yet.
+  const [readingLongMessage, setReadingLongMessage] = useState(false);
+
   // Reset message index to last message when chat changes or messages load
   // Track message counts per-chat to handle switching between chats correctly
   const prevChatIdRef = React.useRef<string | null>(null);
   const messageCounts = React.useRef<Record<string, number>>({});
+  const lastSeen = React.useRef<{ chatId: string | null; messages: Message[] }>({ chatId: null, messages: [] });
   useEffect(() => {
     const chatId = state.selectedChatId;
     const chatChanged = chatId !== prevChatIdRef.current;
     const prevCount = chatId ? messageCounts.current[chatId] ?? 0 : 0;
     const currentCount = currentMessages.length;
+    const previous = lastSeen.current;
+    lastSeen.current = { chatId, messages: currentMessages };
+    if (chatId) {
+      messageCounts.current[chatId] = currentCount;
+    }
+
+    // Messages deleted: stay on the same message, or the next one if it went
+    const kept = new Set(currentMessages.map((m) => m.id));
+    const previousIds = new Set(previous.messages.map((m) => m.id));
+    if (
+      !chatChanged &&
+      previous.chatId === chatId &&
+      currentCount < previous.messages.length &&
+      currentMessages.every((m) => previousIds.has(m.id))
+    ) {
+      const removedAbove = previous.messages.slice(0, messageIndex).filter((m) => !kept.has(m.id)).length;
+      setMessageIndex(Math.max(0, Math.min(currentCount - 1, messageIndex - removedAbove)));
+      return;
+    }
     const isLoadingOlder = chatId ? state.loadingOlderMessages[chatId] ?? false : false;
 
     // Scroll to bottom on: chat switch, messages loaded/replaced, or new message added
@@ -435,9 +739,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
     const messagesFirstLoaded = prevCount === 0 && currentCount > 0;
     const messagesBulkLoaded = !isLoadingOlder && currentCount > 0 && Math.abs(currentCount - prevCount) > 1;
     const newMessageAdded = currentCount === prevCount + 1;
-    // Only auto-scroll to new message if user was already at the bottom
-    const wasAtBottom = prevCount === 0 || messageIndex >= prevCount - 1;
-    const shouldScrollToNew = newMessageAdded && wasAtBottom;
+    // Only auto-scroll to new message if user was already at the bottom, and
+    // not while a reaction picker is open on the current message
+    const wasAtBottom = prevCount === 0 || (messageIndex >= prevCount - 1 && !readingLongMessage);
+    const shouldScrollToNew = newMessageAdded && wasAtBottom && !state.reactionOverlay;
 
     if (chatChanged || messagesFirstLoaded || messagesBulkLoaded || shouldScrollToNew) {
       prevChatIdRef.current = chatId;
@@ -450,22 +755,21 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
       // Clamp index if out of bounds
       setMessageIndex(currentCount - 1);
     }
-
-    if (chatId) {
-      messageCounts.current[chatId] = currentCount;
-    }
-  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages]);
+    // Re-running when readingLongMessage changes is a no-op: the counts already match
+  }, [state.selectedChatId, currentMessages, messageIndex, state.loadingOlderMessages, state.reactionOverlay, readingLongMessage]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {
     const chatId = state.selectedChatId;
-    if (!chatId || currentMessages.length === 0) return false;
+    const oldest = currentMessages[0];
+    // Paging needs a server id; unsent messages only have a negative local one
+    if (!chatId || !oldest || oldest.id < 0) return false;
     return (
       messageIndex === 0 &&
       state.hasMoreMessages[chatId] !== false &&
       !state.loadingOlderMessages[chatId]
     );
-  }, [messageIndex, state.selectedChatId, currentMessages.length, state.hasMoreMessages, state.loadingOlderMessages]);
+  }, [messageIndex, state.selectedChatId, currentMessages, state.hasMoreMessages, state.loadingOlderMessages]);
 
   // Function to load older messages (called manually)
   const loadOlderMessages = useCallback(() => {
@@ -477,19 +781,25 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
     dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: true } });
 
-    telegramService.getMessages(chatId, 50, oldestMessage.id).then((olderMessages) => {
-      if (olderMessages.length > 0) {
-        dispatch({ type: "PREPEND_MESSAGES", payload: { chatId, messages: olderMessages } });
-        // Adjust messageIndex to maintain position
-        setMessageIndex((prev) => prev + olderMessages.length);
+    telegramService.getMessages(chatId, 50, oldestMessage.id).then(
+      (olderMessages) => {
+        if (olderMessages.length > 0) {
+          dispatch({ type: "PREPEND_MESSAGES", payload: { chatId, messages: olderMessages } });
+          // Adjust messageIndex to maintain position
+          setMessageIndex((prev) => prev + olderMessages.length);
+        }
+        dispatch({
+          type: "SET_HAS_MORE_MESSAGES",
+          payload: { chatId, hasMore: olderMessages.length === 50 },
+        });
+        dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
+      },
+      (err: unknown) => {
+        dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
+        showError(`Couldn't load older messages: press Enter to retry (${describeError(err)})`);
       }
-      dispatch({
-        type: "SET_HAS_MORE_MESSAGES",
-        payload: { chatId, hasMore: olderMessages.length === 50 },
-      });
-      dispatch({ type: "SET_LOADING_OLDER_MESSAGES", payload: { chatId, loading: false } });
-    });
-  }, [state.selectedChatId, canLoadOlder, currentMessages, telegramService, dispatch]);
+    );
+  }, [state.selectedChatId, canLoadOlder, currentMessages, telegramService, dispatch, showError]);
 
   // Memoize focus booleans to prevent unnecessary child re-renders
   const isHeaderFocused = state.focusedPanel === "header";
@@ -507,7 +817,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
   }, [state.mediaPanel.isOpen, state.mediaPanel.messageId, currentMessages]);
 
   if (state.isHidden) {
-    return <BlankScreen />;
+    return <BlankScreen newMessages={newWhileHidden} height={terminalRows} />;
   }
 
   // Media popup: full-screen takeover. Replaces the entire UI with the photo
@@ -529,7 +839,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 
   return (
     <SkinContext.Provider value={state.skin}>
-      <Box flexDirection="column" height="100%">
+      {/* A fixed height: Ink's root has none, so "100%" would follow the content, and a frame
+          that reaches the terminal's height is redrawn by clearing the screen */}
+      <Box flexDirection="column" height={terminalRows}>
         {!isMinimal && (
           <HeaderBar
             isFocused={isHeaderFocused}
@@ -540,6 +852,24 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
           <Box flexGrow={1} alignItems="center" justifyContent="center">
             <LogoutPrompt onConfirm={handleLogoutConfirm} onCancel={handleLogoutCancel} />
           </Box>
+        ) : state.showChatSwitcher ? (
+          <Box flexGrow={1} alignItems="center" justifyContent="center">
+            <ChatSwitcher
+              chats={state.chats}
+              onSelect={handleSwitchToChat}
+              onClose={closeChatSwitcher}
+              width={Math.min(60, terminalWidth - 2)}
+              maxRows={Math.min(12, panelHeight - 6)}
+            />
+          </Box>
+        ) : state.showHelp ? (
+          <Box flexGrow={1} alignItems="center" justifyContent="center">
+            <HelpOverlay
+              onClose={closeHelp}
+              width={Math.min(100, terminalWidth - 2)}
+              height={terminalRows - headerReserved - statusReserved}
+            />
+          </Box>
         ) : state.currentView === "settings" ? (
           <SettingsPanel />
         ) : (
@@ -547,16 +877,19 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
             {narrow && (
               <ChatStrip
                 chats={state.chats}
+                status={chatsStatus}
                 selectedIndex={chatIndex}
                 selectedChatId={state.selectedChatId}
                 isFocused={isChatListFocused}
                 typingChats={state.typingChats}
+                drafts={state.drafts}
               />
             )}
             <Box flexGrow={1}>
               {!narrow && (
                 <ChatList
                   chats={state.chats}
+                  status={chatsStatus}
                   selectedChatId={state.selectedChatId}
                   onSelectChat={handleSelectChat}
                   selectedIndex={chatIndex}
@@ -564,6 +897,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                   height={panelHeight}
                   width={getChatListWidth(terminalWidth)}
                   typingChats={state.typingChats}
+                  drafts={state.drafts}
                 />
               )}
               <MessageView
@@ -573,6 +907,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 selectedIndex={messageIndex}
                 setSelectedIndex={setMessageIndex}
                 isLoadingOlder={isLoadingOlder}
+                loadStatus={messagesStatus}
                 canLoadOlder={canLoadOlder}
                 width={messageViewWidth}
                 height={panelHeight}
@@ -580,9 +915,15 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 messageLayout={state.messageLayout}
                 isGroupChat={selectedChat?.isGroup ?? false}
                 chatId={state.selectedChatId}
+                senderColors={state.selectedChatId ? state.senderColors[state.selectedChatId] : undefined}
                 sendReaction={sendReaction}
                 removeReaction={removeReaction}
+                onRetryDelivery={handleRetryDelivery}
+                onLoadOlder={loadOlderMessages}
+                onSeen={handleSeen}
+                reactionOverlay={state.reactionOverlay}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
+                onLinesBelowChange={setReadingLongMessage}
               />
             </Box>
             {isMinimal && state.connectionState !== "connected" && (
@@ -592,7 +933,12 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
                 </Text>
               </Box>
             )}
+            <NoticeLine notice={state.notice} onExpire={handleNoticeExpire} />
+            {/* Keyed by chat: remounting saves the old chat's draft and restores the new one's */}
             <InputBar
+              key={state.selectedChatId ?? "none"}
+              initialText={state.selectedChatId ? state.drafts[state.selectedChatId]?.text : undefined}
+              onSaveDraft={handleSaveDraft}
               isFocused={isInputFocused}
               onSubmit={handleSendMessage}
               onEdit={handleEditMessage}
@@ -603,14 +949,19 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
               editingMessage={state.editingMessage}
               onCancelReply={handleCancelReply}
               onCancelEdit={handleCancelEdit}
+              width={terminalWidth}
+              rows={inputRows}
+              onRowsChange={setInputRows}
+              convertEmoticons={state.convertEmoticons}
             />
-            <ShortcutsBar />
+            <ShortcutsBar width={terminalWidth} isTyping={isInputFocused} />
           </>
         )}
         {!isMinimal && (
           <StatusBar
             connectionState={state.connectionState}
             focusedPanel={state.focusedPanel}
+            width={terminalWidth}
           />
         )}
       </Box>
@@ -621,9 +972,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor }: MainAppP
 interface AppProps {
   useMock?: boolean;
   incognito?: boolean;
+  /** Writes the bell, window title and notification escapes; tests leave it out */
+  writeToTerminal?: (data: string) => void;
 }
 
-export function App({ useMock = false, incognito = false }: AppProps) {
+export function App({ useMock = false, incognito = false, writeToTerminal }: AppProps) {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [telegramService, setTelegramService] = useState<TelegramService | null>(null);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
@@ -641,7 +994,7 @@ export function App({ useMock = false, incognito = false }: AppProps) {
   useEffect(() => {
     if (isSetupComplete && config) {
       if (useMock) {
-        setTelegramService(createMockTelegramService());
+        setTelegramService(createMockTelegramService({ failures: mockFailuresFromEnv() }));
       } else {
         // Try to load existing session
         const session = loadSession();
@@ -664,13 +1017,14 @@ export function App({ useMock = false, incognito = false }: AppProps) {
     }
   }, [isSetupComplete, config, useMock, incognito]);
 
-  const handleSetupComplete = useCallback((newConfig: AppConfig, session: string) => {
-    saveConfig(newConfig);
+  const handleSetupComplete = useCallback(({ apiId, apiHash }: Credentials, session: string) => {
+    // Logging in again keeps your settings
+    saveConfig({ ...(loadConfig() ?? DEFAULT_SETTINGS), apiId, apiHash });
     // Save session string to config directory (skip in incognito mode)
     if (session && !incognito) {
       saveSession(session);
     }
-    setConfig(newConfig);
+    setConfig(loadConfigWithEnvOverrides());
     setIsSetupComplete(true);
   }, [incognito]);
 
@@ -682,7 +1036,7 @@ export function App({ useMock = false, incognito = false }: AppProps) {
       deleteSession();
       // Return to QR auth - keep config, clear setup state
       setTelegramService(null);
-      // Re-trigger setup but skip to auth step
+      // Back to Setup, which goes straight to the QR code with the saved credentials
       setIsSetupComplete(false);
     } else {
       deleteAllData();
@@ -703,25 +1057,37 @@ export function App({ useMock = false, incognito = false }: AppProps) {
   const handleToggleNoColor = useCallback(() => {
     setNoColor((prev) => {
       const next = !prev;
-      const cfg = loadConfig();
-      if (cfg) saveConfig({ ...cfg, noColor: next });
+      updateConfig({ noColor: next });
       return next;
     });
   }, []);
 
   let tree: React.ReactNode;
   if (!isSetupComplete) {
-    tree = <Setup onComplete={handleSetupComplete} preferredAuthMethod="qr" />;
+    tree = (
+      <Setup
+        onComplete={handleSetupComplete}
+        savedCredentials={config ? { apiId: String(config.apiId), apiHash: config.apiHash } : undefined}
+      />
+    );
   } else if (!telegramService) {
     tree = null;
   } else {
     tree = (
       <ErrorBoundary>
-        <AppProvider telegramService={telegramService} initialUiMode={config?.uiMode} initialSkin={config?.skin}>
+        <AppProvider
+          telegramService={telegramService}
+          initialUiMode={config?.uiMode}
+          initialMessageLayout={config?.messageLayout}
+          initialSkin={config?.skin}
+          initialNotifications={config?.notifications}
+          initialConvertEmoticons={config?.convertEmoticons}
+        >
           <MainApp
             telegramService={telegramService}
             onLogout={handleLogout}
             onToggleNoColor={handleToggleNoColor}
+            writeToTerminal={writeToTerminal}
           />
         </AppProvider>
       </ErrorBoundary>

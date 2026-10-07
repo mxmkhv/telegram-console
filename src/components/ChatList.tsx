@@ -1,14 +1,21 @@
 import { memo, useMemo, useEffect } from "react";
 import { Box, Text, useSkin } from "./ui";
-import type { Chat } from "../types";
+import type { Chat, ChatDraft, LoadStatus } from "../types";
 import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
+import { formatChatTime } from "../utils/formatDate.js";
+import { flattenLines, getMessagePreview } from "../utils/messagePreview.js";
 
 // Layout constants
 const INDICATOR_LINES = 2; // Top and bottom scroll indicators
 const HEADER_LINES = 2; // Header text + border
 const BORDER_LINES = 2; // Round border top + bottom
+
+// Each chat takes a title row and a preview row
+const ROWS_PER_CHAT = 2;
+// Lines the preview up under the title, past the unread and group markers
+const PREVIEW_INDENT = "    ";
 
 // Memoized row component
 const ChatRow = memo(function ChatRow({
@@ -17,41 +24,104 @@ const ChatRow = memo(function ChatRow({
   isActive,
   isFlashing,
   isTyping,
+  draftText,
 }: {
   chat: Chat;
   isSelected: boolean;
   isActive: boolean;
   isFlashing: boolean;
   isTyping: boolean;
+  draftText: string | undefined;
 }) {
   const hasUnread = chat.unreadCount > 0;
-  const unreadIndicator = hasUnread ? "● " : "  ";
-  const groupIndicator = chat.isGroup ? "# " : "  ";
-  const title = chat.title.slice(0, 26);
-  const suffix = hasUnread ? ` (${chat.unreadCount})` : "";
+  const highlighted = isSelected || isFlashing;
+  const titleStyle = { inverse: highlighted, bold: hasUnread || isActive, color: isActive ? "cyan" : undefined };
+  const time = chat.lastMessage ? formatChatTime(chat.lastMessage.timestamp) : "";
+  const preview = chat.lastMessage ? getMessagePreview(chat.lastMessage, chat.isGroup) : "";
 
+  // Only the title and preview shrink: Ink truncates them by display width
+  // (CJK-safe), so the time and unread count always stay visible.
   return (
-    <Text wrap="truncate">
-      <Text color={hasUnread ? "cyan" : undefined} inverse={isSelected || isFlashing}>
-        {unreadIndicator}
-      </Text>
-      <Text color={chat.isGroup ? "magenta" : undefined} inverse={isSelected || isFlashing}>
-        {groupIndicator}
-      </Text>
-      <Text
-        inverse={isSelected || isFlashing}
-        bold={hasUnread || isActive}
-        color={isActive ? "cyan" : undefined}
-      >
-        {title}{suffix}
-      </Text>
-      {isTyping && <Text dimColor> …</Text>}
-    </Text>
+    <Box flexDirection="column">
+      <Box height={1}>
+        <Box flexShrink={0}>
+          <Text color={hasUnread ? "cyan" : undefined} inverse={highlighted}>
+            {hasUnread ? "● " : "  "}
+          </Text>
+          <Text color={chat.isGroup ? "magenta" : undefined} inverse={highlighted}>
+            {chat.isGroup ? "# " : "  "}
+          </Text>
+        </Box>
+        <Box flexGrow={1}>
+          <Text wrap="truncate" {...titleStyle}>
+            {flattenLines(chat.title)}
+          </Text>
+        </Box>
+        {time && (
+          <Box flexShrink={0}>
+            <Text dimColor={!hasUnread} color={hasUnread ? "cyan" : undefined}>
+              {" "}
+              {time}
+            </Text>
+          </Box>
+        )}
+      </Box>
+      <Box height={1}>
+        <Box flexShrink={0}>
+          <Text>{PREVIEW_INDENT}</Text>
+        </Box>
+        <Box flexGrow={1}>
+          {isTyping ? (
+            <Text color="cyan" italic wrap="truncate">
+              typing…
+            </Text>
+          ) : draftText !== undefined ? (
+            <Text wrap="truncate">
+              <Text color="yellow">✎ Draft: </Text>
+              <Text dimColor>{flattenLines(draftText)}</Text>
+            </Text>
+          ) : (
+            <Text dimColor wrap="truncate">
+              {preview}
+            </Text>
+          )}
+        </Box>
+        {hasUnread && (
+          <Box flexShrink={0}>
+            <Text color="cyan" bold>
+              {" "}
+              {chat.unreadCount}
+            </Text>
+          </Box>
+        )}
+      </Box>
+    </Box>
   );
 });
 
+function ChatListPlaceholder({ status }: { status: LoadStatus }) {
+  if (status === "error") {
+    return (
+      <>
+        <Text color="red" wrap="truncate">
+          Couldn't load chats
+        </Text>
+        <Text dimColor wrap="truncate">
+          Press Ctrl+R to retry
+        </Text>
+      </>
+    );
+  }
+  return (
+    <Text dimColor wrap="truncate">
+      {status === "loading" ? "Loading chats…" : "No chats yet"}
+    </Text>
+  );
+}
+
 interface ChatListProps {
   chats: Chat[];
+  status: LoadStatus;
   selectedChatId: string | null;
   onSelectChat: (chatId: string) => void;
   selectedIndex: number;
@@ -59,18 +129,20 @@ interface ChatListProps {
   height?: number;
   width?: number;
   typingChats?: Record<string, boolean>;
+  drafts?: Record<string, ChatDraft>;
 }
 
-function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused, height = 24, width = 35, typingChats }: ChatListProps) {
+function ChatListInner({ chats, status, selectedChatId, onSelectChat: _onSelectChat, selectedIndex, isFocused, height = 24, width = 35, typingChats, drafts }: ChatListProps) {
   const skin = useSkin();
   // A single right-edge divider (panelDividers skins) doesn't consume any rows,
   // unlike a full round border's top+bottom border rows.
   const borderLines = skin.panelDividers ? 0 : BORDER_LINES;
   const listHeight = Math.max(1, height - (INDICATOR_LINES + HEADER_LINES + borderLines));
+  const visibleCount = Math.max(1, Math.floor(listHeight / ROWS_PER_CHAT));
   const { visibleChats, visibleStartIndex, itemsAbove, itemsBelow } = useMemo(() => {
     const total = chats.length;
 
-    if (total <= listHeight) {
+    if (total <= visibleCount) {
       return {
         visibleChats: chats,
         visibleStartIndex: 0,
@@ -79,9 +151,9 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
       };
     }
 
-    let start = Math.max(0, selectedIndex - Math.floor(listHeight / 2));
-    start = Math.min(start, total - listHeight);
-    const end = start + listHeight;
+    let start = Math.max(0, selectedIndex - Math.floor(visibleCount / 2));
+    start = Math.min(start, total - visibleCount);
+    const end = start + visibleCount;
 
     return {
       visibleChats: chats.slice(start, end),
@@ -89,7 +161,7 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
       itemsAbove: start,
       itemsBelow: total - end,
     };
-  }, [chats, selectedIndex, listHeight]);
+  }, [chats, selectedIndex, visibleCount]);
 
   const { startFlash, stopFlash, isFlashing } = useFlash();
   const telegramService = useTelegramService();
@@ -131,7 +203,7 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
       {/* Header */}
       <Box paddingX={1} borderStyle="single" borderBottom borderLeft={false} borderRight={false} borderTop={false}>
         <Text bold color={isFocused ? "cyan" : undefined}>Chats</Text>
-        {chats.length > listHeight && (
+        {chats.length > visibleCount && (
           <Text dimColor> ({selectedIndex + 1}/{chats.length})</Text>
         )}
       </Box>
@@ -140,6 +212,8 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
       <Box flexDirection="column" paddingX={1}>
         {/* Top indicator */}
         <Text dimColor>{itemsAbove > 0 ? `  ↑ ${itemsAbove} more` : " "}</Text>
+
+        {chats.length === 0 && <ChatListPlaceholder status={status} />}
 
         {/* Chat items - one Text per line, newline separated */}
         {visibleChats.map((chat, i) => {
@@ -152,6 +226,8 @@ function ChatListInner({ chats, selectedChatId, onSelectChat: _onSelectChat, sel
               isActive={chat.id === selectedChatId}
               isFlashing={isFlashing(chat.id)}
               isTyping={!!typingChats?.[chat.id]}
+              // The open chat's draft is live in the input, not pending
+              draftText={chat.id !== selectedChatId ? drafts?.[chat.id]?.text : undefined}
             />
           );
         })}

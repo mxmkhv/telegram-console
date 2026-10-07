@@ -1,11 +1,9 @@
-import type { Chat, Message, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName } from "../types";
+import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode, ReportedReaction } from "../types";
+import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
   isOpen: boolean;
   messageId: number | null;
-  loading: boolean;
-  imageData: string | null;
-  error: string | null;
 }
 
 export interface AppState {
@@ -13,6 +11,7 @@ export interface AppState {
   chats: Chat[];
   selectedChatId: string | null;
   messages: Record<string, Message[]>;
+  senderColors: Record<string, SenderColors>;
   focusedPanel: FocusedPanel;
   loadingOlderMessages: Record<string, boolean>;
   hasMoreMessages: Record<string, boolean>;
@@ -23,17 +22,29 @@ export interface AppState {
   messageLayout: MessageLayout;
   uiMode: UiMode;
   skin: SkinName;
+  notifications: NotificationMode;
+  convertEmoticons: boolean;
   replyingToMessage: Message | null;
   editingMessage: Message | null;
   isHidden: boolean;
   typingChats: Record<string, boolean>;
+  drafts: Record<string, ChatDraft>;
+  notice: Notice | null;
+  reactionOverlay: ReactionOverlay;
+  showChatSwitcher: boolean;
+  showHelp: boolean;
 }
+
+// The quick-reaction row or the full emoji grid, pinned to the message it was
+// opened on so new messages arriving can't redirect the reaction
+export type ReactionOverlay = { kind: "picker" | "modal"; messageId: number } | null;
 
 export type AppAction =
   | { type: "SET_CONNECTION_STATE"; payload: ConnectionState }
   | { type: "SET_CHATS"; payload: Chat[] }
   | { type: "SELECT_CHAT"; payload: string }
   | { type: "SET_MESSAGES"; payload: { chatId: string; messages: Message[] } }
+  | { type: "MERGE_MESSAGES"; payload: { chatId: string; messages: Message[]; pageFull: boolean } }
   | { type: "ADD_MESSAGE"; payload: { chatId: string; message: Message } }
   | { type: "PREPEND_MESSAGES"; payload: { chatId: string; messages: Message[] } }
   | { type: "SET_FOCUSED_PANEL"; payload: AppState["focusedPanel"] }
@@ -48,13 +59,12 @@ export type AppAction =
   // Media panel actions
   | { type: "OPEN_MEDIA_PANEL"; payload: { messageId: number } }
   | { type: "CLOSE_MEDIA_PANEL" }
-  | { type: "SET_MEDIA_LOADING"; payload: boolean }
-  | { type: "SET_MEDIA_DATA"; payload: string }
-  | { type: "SET_MEDIA_ERROR"; payload: string }
   // Inline preview actions
   | { type: "SET_MESSAGE_LAYOUT"; payload: MessageLayout }
+  | { type: "SET_NOTIFICATIONS"; payload: NotificationMode }
   | { type: "SET_UI_MODE"; payload: UiMode }
   | { type: "SET_SKIN"; payload: SkinName }
+  | { type: "SET_CONVERT_EMOTICONS"; payload: boolean }
   | { type: "SET_HIDDEN"; payload: boolean }
   // Reaction actions
   | { type: "ADD_REACTION"; payload: { chatId: string; messageId: number; emoji: string } }
@@ -62,35 +72,139 @@ export type AppAction =
   // Reply/Edit actions
   | { type: "SET_REPLYING_TO"; payload: Message | null }
   | { type: "SET_EDITING_MESSAGE"; payload: Message | null }
-  | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string } }
-  | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } };
+  | { type: "UPDATE_MESSAGE"; payload: { chatId: string; messageId: number; newText: string; delivery: Delivery | undefined } }
+  // Delivery of sends/edits made from this client
+  | { type: "CONFIRM_MESSAGE"; payload: { chatId: string; localId: number; message: Message } }
+  // `text` is the text the result belongs to; results for an older edit are ignored
+  | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; text: string; delivery: Delivery | undefined } }
+  | { type: "DISCARD_UNSENT"; payload: { chatId: string; messageId: number } }
+  // Changes made elsewhere: by others, or by you on another device
+  | { type: "MESSAGE_EDITED"; payload: { chatId: string; message: Message; reactions: ReportedReaction[] | undefined } }
+  // Without a chatId: any private chat or small group (see TelegramService.onMessagesDeleted)
+  | { type: "MESSAGES_DELETED"; payload: { chatId: string | undefined; messageIds: number[] } }
+  | { type: "SET_REACTIONS"; payload: { chatId: string; messageId: number; reactions: ReportedReaction[] } }
+  | { type: "SET_REACTION_OVERLAY"; payload: ReactionOverlay }
+  | { type: "SET_SHOW_CHAT_SWITCHER"; payload: boolean }
+  | { type: "SET_SHOW_HELP"; payload: boolean }
+  | { type: "SHOW_NOTICE"; payload: Omit<Notice, "id"> }
+  | { type: "CLEAR_NOTICE"; payload?: { id: number } }
+  | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } }
+  | { type: "SAVE_DRAFT"; payload: { chatId: string; draft: ChatDraft } };
 
 export const initialState: AppState = {
   connectionState: "disconnected",
   chats: [],
   selectedChatId: null,
   messages: {},
+  senderColors: {},
   focusedPanel: "chatList",
   loadingOlderMessages: {},
   hasMoreMessages: {},
   currentView: "chat",
   showLogoutPrompt: false,
   headerSelectedButton: "settings",
-  mediaPanel: {
-    isOpen: false,
-    messageId: null,
-    loading: false,
-    imageData: null,
-    error: null,
-  },
+  mediaPanel: { isOpen: false, messageId: null },
   messageLayout: "classic",
   uiMode: "full",
   skin: "default",
+  notifications: "all",
+  convertEmoticons: true,
   replyingToMessage: null,
   editingMessage: null,
   isHidden: false,
   typingChats: {},
+  drafts: {},
+  notice: null,
+  reactionOverlay: null,
+  showChatSwitcher: false,
+  showHelp: false,
 };
+
+// An open overlay owns the keyboard: global shortcuts and panel navigation
+// must not reach the layers behind it.
+export function isOverlayOpen(state: AppState): boolean {
+  return (
+    state.showLogoutPrompt ||
+    state.currentView === "settings" ||
+    state.reactionOverlay !== null ||
+    state.showChatSwitcher ||
+    state.showHelp ||
+    state.mediaPanel.isOpen
+  );
+}
+
+// Reported counts, keeping which are yours where the report leaves that out
+function mergeReactions(
+  current: Message["reactions"],
+  reported: ReportedReaction[] | undefined,
+): Message["reactions"] {
+  return reported?.map((r) => ({
+    ...r,
+    hasUserReacted: r.hasUserReacted ?? current?.find((mine) => mine.emoji === r.emoji)?.hasUserReacted ?? false,
+  }));
+}
+
+function withSenderColors(
+  senderColors: Record<string, SenderColors>,
+  chatId: string,
+  messages: Message[],
+): Record<string, SenderColors> {
+  const existing = senderColors[chatId] ?? {};
+  // Posts without a sender (e.g. channels) have senderId "" and get no color.
+  const senderIds = messages.filter((m) => !m.isOutgoing && m.senderId).map((m) => m.senderId);
+  const next = assignSenderColors(existing, senderIds);
+  return next === existing ? senderColors : { ...senderColors, [chatId]: next };
+}
+
+function mapMessage(
+  state: AppState,
+  chatId: string,
+  messageId: number,
+  update: (msg: Message) => Message,
+): AppState {
+  const messages = state.messages[chatId];
+  // The chat list previews the last message, so keep it in step, opened or not
+  const chats = withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? update(last) : last));
+  if (!messages) return chats === state.chats ? state : { ...state, chats };
+  return {
+    ...state,
+    chats,
+    messages: {
+      ...state.messages,
+      [chatId]: messages.map((msg) => (msg.id === messageId ? update(msg) : msg)),
+    },
+  };
+}
+
+// Returns the same array when nothing changed, so memoized rows don't re-render
+function withLastMessage(
+  chats: Chat[],
+  chatId: string,
+  update: (last: Message) => Message | undefined,
+): Chat[] {
+  const index = chats.findIndex((chat) => chat.id === chatId);
+  const chat = chats[index];
+  if (!chat?.lastMessage) return chats;
+  const lastMessage = update(chat.lastMessage);
+  if (lastMessage === chat.lastMessage) return chats;
+  return chats.with(index, { ...chat, lastMessage });
+}
+
+// A reload replaces the list with server data; keep sends and edits that
+// haven't been confirmed yet so they're never dropped silently.
+function keepUnconfirmed(loaded: Message[], previous: Message[] | undefined): Message[] {
+  const unconfirmed = previous?.filter((m) => m.delivery);
+  if (!unconfirmed?.length) return loaded;
+  const byId = new Map(unconfirmed.map((m) => [m.id, m]));
+  const merged = loaded.map((m) => byId.get(m.id) ?? m);
+  const loadedIds = new Set(loaded.map((m) => m.id));
+  const missing = unconfirmed.filter((m) => !loadedIds.has(m.id));
+  // Edited messages outside the loaded page are older than all of it; unsent
+  // messages are newer
+  const olderEdits = missing.filter((m) => m.delivery?.action === "edit");
+  const unsent = missing.filter((m) => m.delivery?.action === "send");
+  return [...olderEdits, ...merged, ...unsent];
+}
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -100,23 +214,70 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_CHATS":
       return { ...state, chats: action.payload };
 
-    case "SELECT_CHAT":
+    case "SELECT_CHAT": {
+      // Re-selecting the open chat keeps its in-progress reply/edit
+      if (action.payload === state.selectedChatId) {
+        return { ...state, focusedPanel: "messages" };
+      }
+      const draft = state.drafts[action.payload];
       return {
         ...state,
         selectedChatId: action.payload,
         focusedPanel: "messages",
-        replyingToMessage: null,
-        editingMessage: null,
+        replyingToMessage: draft?.replyTo ?? null,
+        editingMessage: draft?.editing ?? null,
       };
+    }
 
-    case "SET_MESSAGES":
+    case "SET_MESSAGES": {
+      // Messages missed while away show up on load: refresh the chat list preview.
+      // A pending local send (negative id) stays the preview until confirmed.
+      const newest = action.payload.messages.at(-1);
       return {
         ...state,
+        chats: newest
+          ? withLastMessage(state.chats, action.payload.chatId, (last) =>
+              last.id > 0 && newest.id > last.id ? newest : last,
+            )
+          : state.chats,
+        senderColors: withSenderColors(state.senderColors, action.payload.chatId, action.payload.messages),
         messages: {
           ...state.messages,
-          [action.payload.chatId]: action.payload.messages,
+          [action.payload.chatId]: keepUnconfirmed(
+            action.payload.messages,
+            state.messages[action.payload.chatId],
+          ),
         },
       };
+    }
+
+    case "MERGE_MESSAGES": {
+      // The newest page after a reconnect: add what was missed by id, keeping
+      // older pages already scrolled through. A full page whose oldest message
+      // isn't known may have left a gap behind it, so it replaces the list.
+      const { chatId, messages: page, pageFull } = action.payload;
+      const existing = state.messages[chatId] ?? [];
+      const known = new Set(existing.map((m) => m.id));
+      if (existing.length === 0 || (pageFull && page[0] && !known.has(page[0].id))) {
+        return appReducer(state, { type: "SET_MESSAGES", payload: { chatId, messages: page } });
+      }
+      const fetched = new Map(page.map((m) => [m.id, m]));
+      // Fresh copies win, except while your own send or edit is in flight
+      const current = existing.map((m) => (m.delivery ? m : (fetched.get(m.id) ?? m)));
+      const confirmed = [...current.filter((m) => m.id > 0), ...page.filter((m) => !known.has(m.id))].sort(
+        (a, b) => a.id - b.id,
+      );
+      const merged = [...confirmed, ...current.filter((m) => m.id < 0)];
+      const newest = confirmed.at(-1);
+      return {
+        ...state,
+        chats: newest
+          ? withLastMessage(state.chats, chatId, (last) => (last.id > 0 && newest.id > last.id ? newest : last))
+          : state.chats,
+        senderColors: withSenderColors(state.senderColors, chatId, merged),
+        messages: { ...state.messages, [chatId]: merged },
+      };
+    }
 
     case "ADD_MESSAGE": {
       const { chatId, message } = action.payload;
@@ -133,7 +294,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         const updatedChat = {
           ...chat,
           lastMessage: message,
-          unreadCount: state.selectedChatId === chatId ? chat.unreadCount : chat.unreadCount + 1,
+          // Your own messages, sent from another device, aren't unread
+          unreadCount: state.selectedChatId === chatId || message.isOutgoing ? chat.unreadCount : chat.unreadCount + 1,
         };
         // Move chat to top of list
         updatedChats = [
@@ -147,6 +309,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         chats: updatedChats,
+        senderColors: withSenderColors(state.senderColors, chatId, [message]),
         messages: {
           ...state.messages,
           [chatId]: [
@@ -160,6 +323,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "PREPEND_MESSAGES":
       return {
         ...state,
+        senderColors: withSenderColors(state.senderColors, action.payload.chatId, action.payload.messages),
         messages: {
           ...state.messages,
           [action.payload.chatId]: [
@@ -226,67 +390,29 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "OPEN_MEDIA_PANEL":
       return {
         ...state,
-        mediaPanel: {
-          isOpen: true,
-          messageId: action.payload.messageId,
-          loading: false,
-          imageData: null,
-          error: null,
-        },
+        mediaPanel: { isOpen: true, messageId: action.payload.messageId },
       };
 
     case "CLOSE_MEDIA_PANEL":
       return {
         ...state,
-        mediaPanel: {
-          isOpen: false,
-          messageId: null,
-          loading: false,
-          imageData: null,
-          error: null,
-        },
-      };
-
-    case "SET_MEDIA_LOADING":
-      return {
-        ...state,
-        mediaPanel: {
-          ...state.mediaPanel,
-          loading: action.payload,
-          error: null,
-        },
-      };
-
-    case "SET_MEDIA_DATA":
-      return {
-        ...state,
-        mediaPanel: {
-          ...state.mediaPanel,
-          loading: false,
-          imageData: action.payload,
-          error: null,
-        },
-      };
-
-    case "SET_MEDIA_ERROR":
-      return {
-        ...state,
-        mediaPanel: {
-          ...state.mediaPanel,
-          loading: false,
-          imageData: null,
-          error: action.payload,
-        },
+        mediaPanel: initialState.mediaPanel,
       };
 
     case "SET_MESSAGE_LAYOUT":
       return { ...state, messageLayout: action.payload };
+
+    case "SET_NOTIFICATIONS":
+      return { ...state, notifications: action.payload };
 
     case "SET_UI_MODE":
       return { ...state, uiMode: action.payload };
 
     case "SET_SKIN":
       return { ...state, skin: action.payload };
+
+    case "SET_CONVERT_EMOTICONS":
+      return { ...state, convertEmoticons: action.payload };
 
     case "SET_HIDDEN":
       return { ...state, isHidden: action.payload };
@@ -350,26 +476,162 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    // Reply and edit are exclusive. Ending an edit also clears the input
+    // (InputBar's edit-sync effect).
     case "SET_REPLYING_TO":
-      return { ...state, replyingToMessage: action.payload };
-
-    case "SET_EDITING_MESSAGE":
-      return { ...state, editingMessage: action.payload };
-
-    case "UPDATE_MESSAGE": {
-      const { chatId, messageId, newText } = action.payload;
-      const messages = state.messages[chatId];
-      if (!messages) return state;
-
-      const updatedMessages = messages.map((msg) =>
-        msg.id === messageId ? { ...msg, text: newText } : msg
-      );
-
       return {
         ...state,
+        replyingToMessage: action.payload,
+        editingMessage: action.payload ? null : state.editingMessage,
+      };
+
+    case "SET_EDITING_MESSAGE":
+      return {
+        ...state,
+        editingMessage: action.payload,
+        replyingToMessage: action.payload ? null : state.replyingToMessage,
+      };
+
+    case "UPDATE_MESSAGE": {
+      const { chatId, messageId, newText, delivery } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => ({ ...msg, text: newText, delivery }));
+    }
+
+    case "CONFIRM_MESSAGE": {
+      const { chatId, localId, message } = action.payload;
+      const messages = state.messages[chatId] ?? [];
+      // The NewMessage event may have delivered the real message first
+      const alreadyAdded = messages.some((m) => m.id === message.id);
+      const updatedMessages = alreadyAdded
+        ? messages.filter((m) => m.id !== localId)
+        : messages.map((m) => (m.id === localId ? message : m));
+      return {
+        ...state,
+        chats: state.chats.map((chat) =>
+          chat.id === chatId && chat.lastMessage?.id === localId
+            ? { ...chat, lastMessage: message }
+            : chat
+        ),
         messages: { ...state.messages, [chatId]: updatedMessages },
       };
     }
+
+    case "SET_DELIVERY": {
+      const { chatId, messageId, text, delivery } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => (msg.text === text ? { ...msg, delivery } : msg));
+    }
+
+    case "DISCARD_UNSENT": {
+      const { chatId, messageId } = action.payload;
+      const messages = state.messages[chatId];
+      const delivery = messages?.find((m) => m.id === messageId)?.delivery;
+      if (!messages || !delivery) return state;
+      if (delivery.action === "edit") {
+        return mapMessage(state, chatId, messageId, (msg) => ({
+          ...msg,
+          text: delivery.originalText,
+          delivery: undefined,
+        }));
+      }
+      const remaining = messages.filter((m) => m.id !== messageId);
+      return {
+        ...state,
+        chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? remaining.at(-1) : last)),
+        messages: { ...state.messages, [chatId]: remaining },
+      };
+    }
+
+    case "MESSAGE_EDITED": {
+      const { chatId, message, reactions } = action.payload;
+      return mapMessage(state, chatId, message.id, (msg) =>
+        // Your own edit from here is still in flight: its result decides
+        msg.delivery
+          ? msg
+          : {
+              ...msg,
+              text: message.text,
+              media: message.media,
+              reactions: mergeReactions(msg.reactions, reactions),
+              replyToMsgId: message.replyToMsgId,
+              forwardedFrom: message.forwardedFrom,
+            },
+      );
+    }
+
+    case "MESSAGES_DELETED": {
+      const { chatId, messageIds } = action.payload;
+      const deleted = new Set(messageIds);
+      // Without a chat, it's any private chat or small group: their ids don't repeat
+      const sharingIds = new Set(state.chats.filter((chat) => !chat.isChannel).map((chat) => chat.id));
+      const inChat = (id: string) => (chatId === undefined ? sharingIds.has(id) : id === chatId);
+      let messages = state.messages;
+      for (const [id, list] of Object.entries(state.messages)) {
+        if (!inChat(id) || !list.some((m) => deleted.has(m.id))) continue;
+        messages = { ...messages, [id]: list.filter((m) => !deleted.has(m.id)) };
+      }
+      const chats = state.chats.map((chat) =>
+        inChat(chat.id) && chat.lastMessage && deleted.has(chat.lastMessage.id)
+          ? // What came before it, if it's loaded
+            { ...chat, lastMessage: messages[chat.id]?.at(-1) }
+          : chat,
+      );
+      // Nothing left to react to, view or reply to
+      const goneHere = (id: number | null | undefined) =>
+        id != null && deleted.has(id) && !!state.selectedChatId && inChat(state.selectedChatId);
+      const mediaGone = state.mediaPanel.isOpen && goneHere(state.mediaPanel.messageId);
+      const replyGone = goneHere(state.replyingToMessage?.id);
+      const editGone = goneHere(state.editingMessage?.id);
+      // Other chats' drafts let go of it too
+      let drafts = state.drafts;
+      for (const [id, draft] of Object.entries(state.drafts)) {
+        const replyTo = draft.replyTo && deleted.has(draft.replyTo.id) ? null : draft.replyTo;
+        const editing = draft.editing && deleted.has(draft.editing.id) ? null : draft.editing;
+        if (!inChat(id) || (replyTo === draft.replyTo && editing === draft.editing)) continue;
+        drafts = { ...drafts, [id]: { ...draft, replyTo, editing } };
+      }
+      const next: AppState = {
+        ...state,
+        messages,
+        chats,
+        drafts,
+        reactionOverlay: goneHere(state.reactionOverlay?.messageId) ? null : state.reactionOverlay,
+        mediaPanel: mediaGone ? initialState.mediaPanel : state.mediaPanel,
+        focusedPanel: mediaGone ? "messages" : state.focusedPanel,
+        replyingToMessage: replyGone ? null : state.replyingToMessage,
+        editingMessage: editGone ? null : state.editingMessage,
+      };
+      // Say why it closed, unless that would hide an error still waiting on you
+      if ((!mediaGone && !replyGone && !editGone) || state.notice?.sticky) return next;
+      const text = mediaGone
+        ? "That message was deleted"
+        : editGone
+          ? "The message you were editing was deleted"
+          : "The message you were replying to was deleted";
+      return appReducer(next, { type: "SHOW_NOTICE", payload: { kind: "info", text } });
+    }
+
+    case "SET_REACTIONS": {
+      const { chatId, messageId, reactions } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => ({ ...msg, reactions: mergeReactions(msg.reactions, reactions) }));
+    }
+
+    case "SET_REACTION_OVERLAY":
+      return { ...state, reactionOverlay: action.payload };
+
+    case "SET_SHOW_CHAT_SWITCHER":
+      return { ...state, showChatSwitcher: action.payload };
+
+    case "SET_SHOW_HELP":
+      return { ...state, showHelp: action.payload };
+
+    case "SHOW_NOTICE":
+      return { ...state, notice: { ...action.payload, id: (state.notice?.id ?? 0) + 1 } };
+
+    case "CLEAR_NOTICE":
+      if (!state.notice) return state;
+      // An expiring timer must not clear a newer notice
+      if (action.payload && action.payload.id !== state.notice.id) return state;
+      return { ...state, notice: null };
 
     case "SET_TYPING": {
       const { chatId, isTyping } = action.payload;
@@ -380,6 +642,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const next = { ...state.typingChats };
       delete next[chatId];
       return { ...state, typingChats: next };
+    }
+
+    case "SAVE_DRAFT": {
+      const { chatId, draft } = action.payload;
+      if (draft.text.trim() || draft.replyTo || draft.editing) {
+        return { ...state, drafts: { ...state.drafts, [chatId]: draft } };
+      }
+      // Nothing worth keeping: discard any previous draft
+      if (!state.drafts[chatId]) return state;
+      const next = { ...state.drafts };
+      delete next[chatId];
+      return { ...state, drafts: next };
     }
 
     default:

@@ -1,8 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback, memo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from "react";
 import { useInput } from "ink";
+import stringWidth from "string-width";
 import { Box, Text, useSkin } from "./ui";
-import type { Message, ImageSendResult } from "../types";
+import type { Message, ImageSendResult, ChatDraft } from "../types";
 import { transformEmoticons } from "../utils/emoticonMap";
+import { findCursorRow, moveCursorToRow, nextBoundary, previousBoundary, sanitizeInput, wrapInput } from "../utils/inputLayout";
+
+/** A long draft scrolls inside the input past this many rows */
+export const MAX_INPUT_ROWS = 4;
 
 interface InputBarProps {
   isFocused: boolean;
@@ -15,6 +20,18 @@ interface InputBarProps {
   editingMessage?: Message | null;
   onCancelReply?: () => void;
   onCancelEdit?: () => void;
+  // Read on mount only - the parent keys InputBar by chat to restore drafts
+  initialText?: string;
+  // Called on unmount with the chat's text and reply/edit context
+  onSaveDraft?: (chatId: string, draft: ChatDraft) => void;
+  /** Columns the bar spans */
+  width: number;
+  /** Text rows the layout reserved; defaults to what the text needs */
+  rows?: number;
+  /** Text rows the text needs, up to MAX_INPUT_ROWS */
+  onRowsChange?: (rows: number) => void;
+  /** Turn :) into 🙂 as you type */
+  convertEmoticons?: boolean;
 }
 
 // Combined state to avoid race conditions between value and cursor
@@ -34,11 +51,40 @@ function InputBarInner({
   editingMessage,
   onCancelReply,
   onCancelEdit,
+  initialText = "",
+  onSaveDraft,
+  width,
+  rows,
+  onRowsChange,
+  convertEmoticons = true,
 }: InputBarProps) {
   // Single state object prevents race conditions between value and cursor updates
-  const [state, setState] = useState<InputState>({ value: "", cursor: 0 });
-  const prevChatIdRef = useRef(selectedChatId);
+  const [state, setState] = useState<InputState>(() => {
+    const value = sanitizeInput(initialText);
+    return { value, cursor: value.length };
+  });
   const skin = useSkin();
+
+  // Save the draft on unmount. The parent keys InputBar by chat, so the last
+  // committed snapshot still holds the previous chat's text and reply/edit.
+  const snapshot = {
+    chatId: selectedChatId,
+    onSaveDraft,
+    text: state.value,
+    replyTo: replyingToMessage ?? null,
+    editing: editingMessage ?? null,
+  };
+  const draftSnapshot = useRef(snapshot);
+  useEffect(() => {
+    draftSnapshot.current = snapshot;
+  });
+  useEffect(
+    () => () => {
+      const { chatId, onSaveDraft: save, ...draft } = draftSnapshot.current;
+      if (chatId) save?.(chatId, draft);
+    },
+    []
+  );
 
   // Blinking text cursor (ribbon skin only) - focus is no longer shown via
   // color changes on the caret/rule, so the flashing cursor is the only
@@ -66,38 +112,55 @@ function InputBarInner({
     []
   );
 
-  // Clear input when chat changes
+  // Entering edit mode loads the message text; leaving it clears the input.
+  // The edit present at mount is a restored draft whose text may differ from
+  // the original, so skip it.
+  const prevEditingRef = useRef(editingMessage);
   useEffect(() => {
-    if (selectedChatId !== prevChatIdRef.current) {
-      setState({ value: "", cursor: 0 });
-      prevChatIdRef.current = selectedChatId;
-    }
-  }, [selectedChatId]);
-
-  // Populate input when entering edit mode
-  useEffect(() => {
-    if (editingMessage) {
-      setState({
-        value: editingMessage.text,
-        cursor: editingMessage.text.length,
-      });
-    }
+    if (editingMessage === prevEditingRef.current) return;
+    prevEditingRef.current = editingMessage;
+    const value = editingMessage ? sanitizeInput(editingMessage.text) : "";
+    setState({ value, cursor: value.length });
   }, [editingMessage]);
+
+  // Enter clears the input inside a state updater so fast typing isn't lost;
+  // the submit runs after commit because updaters must not dispatch.
+  const pendingSubmit = useRef<string | null>(null);
+  useEffect(() => {
+    const text = pendingSubmit.current;
+    if (text === null || !selectedChatId) return;
+    pendingSubmit.current = null;
+    if (editingMessage && onEdit) {
+      // Compared as shown, so opening an edit with tabs in it doesn't count as a change
+      if (text !== sanitizeInput(editingMessage.text)) {
+        onEdit(text, selectedChatId, editingMessage.id);
+      }
+      onCancelEdit?.();
+      return;
+    }
+    onSubmit(text, selectedChatId);
+    onCancelReply?.();
+  });
+
+  // The caret, and the transient status on the right, share the first row.
+  // A long status (an error) is cut so the text keeps most of the row.
+  const statusWidth = status ? Math.min(1 + stringWidth(status), Math.floor(width / 3)) : 0;
+  const chromeWidth = (skin.inputRibbon ? 2 : 4) + 2 + statusWidth;
+  // One column stays free for the cursor at the end of a row
+  const wrapWidth = Math.max(1, width - chromeWidth - 1);
 
   // Custom input handler - atomic state updates prevent character flipping
   useInput(
     (input, key) => {
-      // Escape: cancel reply/edit mode
+      // Escape leaves the input (handled by App); reply/edit context is kept
       if (key.escape) {
-        if (editingMessage && onCancelEdit) {
-          onCancelEdit();
-          setState({ value: "", cursor: 0 });
-          return;
-        }
-        if (replyingToMessage && onCancelReply) {
-          onCancelReply();
-          return;
-        }
+        return;
+      }
+
+      // Cancel reply/edit mode (Ctrl+X)
+      if (key.ctrl && input === "x") {
+        if (editingMessage) onCancelEdit?.();
+        else if (replyingToMessage) onCancelReply?.();
         return;
       }
 
@@ -107,25 +170,25 @@ function InputBarInner({
         return;
       }
 
-      // Submit on Enter
+      // Up/down move between rows; past the first or last row, to the start or end
+      if (key.upArrow || key.downArrow) {
+        setState((s) => {
+          const inputRows = wrapInput(s.value, wrapWidth);
+          const target = findCursorRow(inputRows, s.cursor) + (key.upArrow ? -1 : 1);
+          if (target < 0) return { ...s, cursor: 0 };
+          if (target >= inputRows.length) return { ...s, cursor: s.value.length };
+          return { ...s, cursor: moveCursorToRow(s.value, inputRows, s.cursor, target) };
+        });
+        return;
+      }
+
+      // Submit on Enter (sent from the effect above once the input clears)
       if (key.return) {
         setState((s) => {
           if (s.value.trim() && selectedChatId) {
             // Transform any trailing emoticon before submitting
-            const { text: transformedText } = transformEmoticons(s.value, s.value.length);
-            const finalText = transformedText.trim();
-
-            // Edit mode: call onEdit
-            if (editingMessage && onEdit) {
-              if (finalText !== editingMessage.text) {
-                onEdit(finalText, selectedChatId, editingMessage.id);
-              }
-              onCancelEdit?.();
-              return { value: "", cursor: 0 };
-            }
-            // Normal/Reply mode: call onSubmit
-            onSubmit(finalText, selectedChatId);
-            onCancelReply?.();
+            const text = convertEmoticons ? transformEmoticons(s.value, s.value.length).text : s.value;
+            pendingSubmit.current = text.trim();
             return { value: "", cursor: 0 };
           }
           return s;
@@ -137,10 +200,8 @@ function InputBarInner({
       if (key.backspace || key.delete) {
         setState((s) => {
           if (s.cursor > 0) {
-            return {
-              value: s.value.slice(0, s.cursor - 1) + s.value.slice(s.cursor),
-              cursor: s.cursor - 1,
-            };
+            const start = previousBoundary(s.value, s.cursor);
+            return { value: s.value.slice(0, start) + s.value.slice(s.cursor), cursor: start };
           }
           return s;
         });
@@ -149,13 +210,13 @@ function InputBarInner({
 
       // Cursor movement - left
       if (key.leftArrow) {
-        setState((s) => ({ ...s, cursor: Math.max(0, s.cursor - 1) }));
+        setState((s) => ({ ...s, cursor: previousBoundary(s.value, s.cursor) }));
         return;
       }
 
       // Cursor movement - right
       if (key.rightArrow) {
-        setState((s) => ({ ...s, cursor: Math.min(s.value.length, s.cursor + 1) }));
+        setState((s) => ({ ...s, cursor: nextBoundary(s.value, s.cursor) }));
         return;
       }
 
@@ -182,14 +243,17 @@ function InputBarInner({
         return;
       }
 
-      // Insert character at cursor position
+      // Insert character at cursor position. Alt+Enter arrives as "\r" and
+      // Ctrl+J as "\n": both start a new line, as do newlines in a paste.
       if (input && !key.ctrl && !key.meta) {
+        const text = sanitizeInput(input);
+        if (!text) return;
         setState((s) => {
-          const newValue = s.value.slice(0, s.cursor) + input + s.value.slice(s.cursor);
-          const newCursor = s.cursor + input.length;
+          const newValue = s.value.slice(0, s.cursor) + text + s.value.slice(s.cursor);
+          const newCursor = s.cursor + text.length;
 
           // Transform emoticon when space is typed
-          if (input === " ") {
+          if (text === " " && convertEmoticons) {
             const { text, cursorAdjustment } = transformEmoticons(newValue, newCursor);
             return { value: text, cursor: newCursor + cursorAdjustment };
           }
@@ -205,11 +269,26 @@ function InputBarInner({
   const placeholder = selectedChatId ? "Type a message..." : "Select a chat first";
   const showPlaceholder = !value && !isFocused;
 
-  // Render text with cursor
   const safeCursor = Math.min(cursor, value.length);
-  const beforeCursor = value.slice(0, safeCursor);
-  const atCursor = value[safeCursor] || " ";
-  const afterCursor = value.slice(safeCursor + 1);
+  const inputRows = useMemo(() => wrapInput(value, wrapWidth), [value, wrapWidth]);
+  const cursorRow = findCursorRow(inputRows, safeCursor);
+
+  // The layout reserves the rows, so report what the text needs
+  const neededRows = Math.min(MAX_INPUT_ROWS, inputRows.length);
+  useEffect(() => {
+    onRowsChange?.(neededRows);
+  }, [neededRows, onRowsChange]);
+  // Overlays that replace the chat view get back the rows a long draft took
+  useEffect(() => () => onRowsChange?.(1), [onRowsChange]);
+  const shownRows = rows ?? neededRows;
+
+  // Scroll only as far as it takes to keep the cursor's row in view
+  const scrollRef = useRef(0);
+  let scroll = scrollRef.current;
+  if (cursorRow < scroll) scroll = cursorRow;
+  if (cursorRow >= scroll + shownRows) scroll = cursorRow - shownRows + 1;
+  scroll = Math.max(0, Math.min(scroll, inputRows.length - shownRows));
+  scrollRef.current = scroll;
 
   // Determine mode indicator
   const modeIndicator = editingMessage
@@ -221,21 +300,44 @@ function InputBarInner({
   const caretColor = skin.inputRibbon ? "cyan" : isFocused ? "cyan" : "white";
   const cursorInverse = isFocused && (skin.inputRibbon ? cursorBlinkOn : true);
 
+  const renderRow = (index: number) => {
+    const row = inputRows[index];
+    if (!row) return " ";
+    if (index !== cursorRow) return value.slice(row.start, row.end);
+    // At the end of a line the cursor sits on a blank cell after the text
+    const atEnd = safeCursor >= row.end;
+    const cursorEnd = atEnd ? safeCursor : nextBoundary(value, safeCursor);
+    return (
+      <>
+        {value.slice(row.start, safeCursor)}
+        <Text inverse={cursorInverse}>{atEnd ? " " : value.slice(safeCursor, cursorEnd)}</Text>
+        {value.slice(cursorEnd, row.end)}
+      </>
+    );
+  };
+
   const inputRow = (
     <>
       <Text bold color={caretColor}>{skin.inputRibbon ? skin.glyphs.caret : ">"} </Text>
-      <Box flexGrow={1}>
+      <Box flexGrow={1} flexDirection="column">
         {showPlaceholder ? (
-          <Text dimColor>{placeholder}</Text>
+          <Text dimColor wrap="truncate">{placeholder}</Text>
         ) : (
-          <Text>
-            <Text>{beforeCursor}</Text>
-            <Text inverse={cursorInverse}>{atCursor}</Text>
-            <Text>{afterCursor}</Text>
-          </Text>
+          Array.from({ length: shownRows }, (_, i) => (
+            <Text key={i} wrap="truncate">
+              {renderRow(scroll + i)}
+            </Text>
+          ))
         )}
       </Box>
-      {status && <Text dimColor> {status}</Text>}
+      {status && (
+        <Box width={statusWidth} flexShrink={0}>
+          <Text dimColor wrap="truncate">
+            {" "}
+            {status}
+          </Text>
+        </Box>
+      )}
     </>
   );
 
@@ -244,7 +346,7 @@ function InputBarInner({
       {/* Mode indicator */}
       {modeIndicator && (
         <Box paddingX={1}>
-          <Text dimColor>{modeIndicator} (Esc to cancel)</Text>
+          <Text dimColor wrap="truncate">{modeIndicator} (^X to cancel)</Text>
         </Box>
       )}
       {skin.inputRibbon ? (
@@ -266,7 +368,6 @@ function InputBarInner({
       ) : (
         <Box
           width="100%"
-          minHeight={3}
           borderStyle="round"
           borderColor={isFocused ? "cyan" : "blue"}
           paddingX={1}
@@ -288,6 +389,9 @@ export const InputBar = memo(InputBarInner, (prev, next) => {
     prev.onSendImage === next.onSendImage &&
     prev.onStartEdit === next.onStartEdit &&
     prev.replyingToMessage === next.replyingToMessage &&
-    prev.editingMessage === next.editingMessage
+    prev.editingMessage === next.editingMessage &&
+    prev.width === next.width &&
+    prev.rows === next.rows &&
+    prev.onRowsChange === next.onRowsChange
   );
 });

@@ -1,4 +1,5 @@
 import React from "react";
+import { useInput } from "ink";
 import { Box, Text } from "../ui";
 
 interface WelcomeProps {
@@ -6,10 +7,9 @@ interface WelcomeProps {
 }
 
 export function Welcome({ onContinue }: WelcomeProps) {
-  React.useEffect(() => {
-    const timer = setTimeout(onContinue, 100);
-    return () => clearTimeout(timer);
-  }, [onContinue]);
+  useInput((_input, key) => {
+    if (key.return) onContinue();
+  });
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -25,6 +25,7 @@ export function Welcome({ onContinue }: WelcomeProps) {
         </Text>
       </Text>
       <Text></Text>
+      <Text dimColor>[Press Enter to continue]</Text>
     </Box>
   );
 }

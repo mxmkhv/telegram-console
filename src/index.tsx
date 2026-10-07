@@ -50,4 +50,8 @@ Options:
 const useMock = process.argv.includes("--mock");
 const incognito = process.argv.includes("--incognito");
 
-render(<App useMock={useMock} incognito={incognito} />);
+// Escapes go straight to the terminal: they print nothing, so Ink's frame is unaffected
+const writeToTerminal = process.stdout.isTTY ? (data: string) => void process.stdout.write(data) : undefined;
+
+// Rewrite only the lines that changed: redrawing every line on each update flickers
+render(<App useMock={useMock} incognito={incognito} writeToTerminal={writeToTerminal} />, { incrementalRendering: true });

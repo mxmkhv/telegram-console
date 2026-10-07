@@ -1,5 +1,6 @@
 import terminalImage from 'terminal-image';
 import type { MediaAttachment } from '../types/index.js';
+import { describeMedia } from '../utils/media.js';
 
 /**
  * Wrapper that forces ANSI half-block rendering instead of native inline-image
@@ -50,8 +51,10 @@ function formatBytes(bytes: number): string {
     result = `${bytes}B`;
   } else if (bytes < 1024 * 1024) {
     result = `${(bytes / 1024).toFixed(1)}KB`;
-  } else {
+  } else if (bytes < 1024 * 1024 * 1024) {
     result = `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  } else {
+    result = `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
   }
 
   formatBytesCache.set(bytes, result);
@@ -64,26 +67,30 @@ function formatDuration(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
+// Keyed by the attachment: message ids repeat across chats
+const metadataCache = new WeakMap<MediaAttachment, string>();
 
-const metadataCache = new Map<number, string>();
+const MEDIA_ICONS: Record<MediaAttachment['type'], string> = {
+  photo: '📷',
+  sticker: '😀',
+  gif: '🎬',
+  video: '🎥',
+  videoNote: '🎥',
+  voice: '🎤',
+  audio: '🎵',
+  document: '📄',
+  poll: '📊',
+  location: '📍',
+  contact: '👤',
+  other: '📎',
+};
 
-export function formatMediaMetadata(media: MediaAttachment, messageId: number): string {
-  const cached = metadataCache.get(messageId);
+export function formatMediaMetadata(media: MediaAttachment): string {
+  const cached = metadataCache.get(media);
   if (cached) return cached;
 
-  const icons: Record<string, string> = {
-    photo: '📷',
-    sticker: '😀',
-    gif: '🎬',
-    video: '🎥',
-    document: '📄',
-    voice: '🎤',
-  };
-
-  const icon = media.isAnimated ? '🎭' : icons[media.type] ?? '📎';
+  // Dice and the like carry their own emoji
+  const icon = media.isAnimated ? '🎭' : media.type === 'other' && media.emoji ? '' : MEDIA_ICONS[media.type];
   const size = media.fileSize ? formatBytes(media.fileSize) : '';
   const dims = media.width && media.height ? `${media.width}x${media.height}` : '';
   const emoji = media.emoji ? `: ${media.emoji}` : '';
@@ -96,10 +103,10 @@ export function formatMediaMetadata(media: MediaAttachment, messageId: number): 
   } else if (media.type === 'voice') {
     label = 'Voice';
   } else {
-    label = capitalize(media.type);
+    label = describeMedia(media);
   }
 
-  const result = `[${icon} ${label}${parts ? `: ${parts}` : ''}]`;
-  metadataCache.set(messageId, result);
+  const result = `[${[icon, label].filter(Boolean).join(' ')}${parts ? `: ${parts}` : ''}]`;
+  metadataCache.set(media, result);
   return result;
 }

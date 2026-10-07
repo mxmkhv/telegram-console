@@ -42,15 +42,18 @@ export function toGray(color: TextProps["color"]): TextProps["color"] {
   return GRAY_BY_NAME[color] ?? DEFAULT_GRAY;
 }
 
+// Backgrounds only flash a message: one shade dark enough for light text on top
+const GRAY_BACKGROUND = "ansi256(242)";
+
 /**
  * Returns the Text props to forward to Ink. In grayscale mode `color` is mapped
- * to a gray shade and `backgroundColor` is dropped; all formatting props
- * (inverse, bold, dimColor, …) are preserved.
+ * to a gray shade and any `backgroundColor` becomes one mid gray; all formatting
+ * props (inverse, bold, dimColor, …) are preserved.
  */
 export function grayscaleTextProps(props: TextProps, grayscale: boolean): TextProps {
   if (!grayscale) return props;
-  const { backgroundColor: _bg, ...rest } = props;
-  return { ...rest, color: toGray(props.color) };
+  const { backgroundColor, ...rest } = props;
+  return { ...rest, color: toGray(props.color), ...(backgroundColor ? { backgroundColor: GRAY_BACKGROUND } : null) };
 }
 
 /**

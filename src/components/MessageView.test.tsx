@@ -1,7 +1,9 @@
 import { describe, it, expect } from "bun:test";
 import { render } from "ink-testing-library";
 import React from "react";
+import { useInput } from "ink";
 import { MessageView, countWrappedLines } from "./MessageView";
+import { LOGO_COLS, LOGO_ROWS } from "./logoAssets";
 import { AppProvider } from "../state/context";
 import { SkinContext } from "./ui/SkinContext";
 import type { Message } from "../types";
@@ -36,6 +38,8 @@ const mockMessages: Message[] = [
 const mockDispatch = () => {};
 const mockSendReaction = async (_chatId: string, _messageId: number, _emoji: string) => true;
 const mockRemoveReaction = async (_chatId: string, _messageId: number) => true;
+const mockRetryDelivery = () => {};
+const mockLoadOlder = () => {};
 
 function renderWithProvider(ui: React.ReactElement) {
   return render(<AppProvider>{ui}</AppProvider>);
@@ -56,6 +60,9 @@ describe("MessageView", () => {
         chatId={null}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -75,6 +82,9 @@ describe("MessageView", () => {
         chatId={null}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -94,6 +104,9 @@ describe("MessageView", () => {
         chatId="chat1"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -112,6 +125,9 @@ describe("MessageView", () => {
       chatId: "chat1",
       sendReaction: mockSendReaction,
       removeReaction: mockRemoveReaction,
+      onRetryDelivery: mockRetryDelivery,
+      onLoadOlder: mockLoadOlder,
+      reactionOverlay: null,
     };
     const defaultFrame = renderWithProvider(<MessageView {...props} />).lastFrame() ?? "";
     const claudeCodeFrame =
@@ -142,6 +158,9 @@ describe("MessageView", () => {
         chatId="chat1"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toMatchSnapshot();
@@ -161,6 +180,9 @@ describe("MessageView", () => {
         chatId="chat1"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     // Snapshot will capture the styling including cyan color for "You"
@@ -190,6 +212,9 @@ describe("MessageView", () => {
         chatId="1"
         sendReaction={async () => true}
         removeReaction={async () => true}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />,
     );
     const frame = lastFrame() ?? "";
@@ -217,6 +242,9 @@ describe("MessageView", () => {
         isTyping={true}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).toContain("typing…");
@@ -238,6 +266,9 @@ describe("MessageView", () => {
         isTyping={false}
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
       />
     );
     expect(lastFrame()).not.toContain("typing…");
@@ -270,6 +301,9 @@ describe("MessageView", () => {
         chatId="test-chat"
         sendReaction={mockSendReaction}
         removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
         messageLayout="classic"
         isGroupChat={false}
       />
@@ -304,5 +338,752 @@ describe("countWrappedLines", () => {
   it("counts leading whitespace and never under-counts", () => {
     // " abc" is 4 chars at width 3 -> at least 2 rows
     expect(countWrappedLines(" abc", 3)).toBe(2);
+  });
+
+  it("measures emoji and CJK in terminal columns", () => {
+    // 6 characters, 12 columns
+    expect(countWrappedLines("中文中文中文", 6)).toBe(2);
+    expect(countWrappedLines("🚀🚀🚀", 4)).toBe(2);
+  });
+
+  it("starts a long word on the current row when Ink does", () => {
+    expect(countWrappedLines("Tesla bb supercalifragilistic", 18)).toBe(2);
+  });
+});
+
+describe("MessageView wide characters", () => {
+  it("keeps the newest message visible when CJK text wraps", () => {
+    const cjk = (id: number, text: string): Message => ({
+      id,
+      senderId: "user1",
+      senderName: "Alice",
+      text,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    });
+    const messages = [cjk(1, "中文中文中文中文中文"), cjk(2, "中文中文中文中文中文"), cjk(3, "最后的消息最后的消息")];
+    const { lastFrame } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={2}
+        width={34}
+        height={8}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    expect(lastFrame()).toContain("最后的消息");
+  });
+});
+
+describe("MessageView empty state logo", () => {
+  const LOGO_INK = "⣿";
+
+  function renderEmptyState(width: number, height: number) {
+    return renderWithProvider(
+      <MessageView
+        isFocused={false}
+        selectedChatTitle={null}
+        messages={[]}
+        selectedIndex={0}
+        width={width}
+        height={height}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId={null}
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />
+    ).lastFrame()!;
+  }
+
+  it("shows the logo above the hint when the panel has room", () => {
+    const frame = renderEmptyState(LOGO_COLS + 6, LOGO_ROWS + 6);
+    expect(frame).toContain(LOGO_INK);
+    expect(frame.indexOf(LOGO_INK)).toBeLessThan(frame.indexOf("Select a chat to start"));
+  });
+
+  it("drops the logo but keeps the hint in a short panel", () => {
+    const frame = renderEmptyState(80, LOGO_ROWS + 5);
+    expect(frame).not.toContain(LOGO_INK);
+    expect(frame).toContain("Select a chat to start");
+  });
+
+  it("drops the logo but keeps the hint in a narrow panel", () => {
+    const frame = renderEmptyState(LOGO_COLS + 5, 30);
+    expect(frame).not.toContain(LOGO_INK);
+    expect(frame).toContain("Select a chat to start");
+  });
+});
+
+describe("MessageView day separators", () => {
+  const at = (id: number, date: Date, text: string): Message => ({
+    id,
+    senderId: "user1",
+    senderName: "Alice",
+    text,
+    timestamp: date,
+    isOutgoing: false,
+  });
+
+  it("labels each day once, sits on the bottom, and still fits", () => {
+    const today = new Date();
+    today.setHours(9, 0);
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const messages = [at(1, yesterday, "first"), at(2, yesterday, "second"), at(3, today, "third")];
+    const { lastFrame } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={2}
+        width={40}
+        height={20}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    const lines = (lastFrame() ?? "").split("\n");
+    const row = (text: string) => lines.findIndex((line) => line.includes(text));
+    expect(lines.filter((line) => line.includes("── Yesterday ──"))).toHaveLength(1);
+    expect(row("── Yesterday ──")).toBe(row("first") - 1);
+    expect(row("── Today ──")).toBe(row("third") - 1);
+    // Newest message is the last row inside the border
+    expect(row("third")).toBe(lines.length - 2);
+  });
+});
+
+describe("MessageView load states", () => {
+  const renderEmpty = (loadStatus: "loading" | "ready" | "error") =>
+    renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[]}
+        selectedIndex={0}
+        loadStatus={loadStatus}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    ).lastFrame() ?? "";
+
+  it("tells loading, failed and empty chats apart", () => {
+    expect(renderEmpty("loading")).toContain("Loading messages…");
+    expect(renderEmpty("error")).toContain("Press Ctrl+R to retry");
+    expect(renderEmpty("ready")).toContain("No messages yet");
+  });
+});
+
+describe("MessageView paging", () => {
+  it("PgUp and PgDn move by a screen of messages", async () => {
+    const messages: Message[] = Array.from({ length: 30 }, (_, i) => ({
+      id: i + 1,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${i + 1}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }));
+    const moves: number[] = [];
+    function Paged() {
+      const [selectedIndex, setSelectedIndex] = React.useState(29);
+      return (
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={selectedIndex}
+        setSelectedIndex={(index) => {
+          moves.push(index);
+          setSelectedIndex(index);
+        }}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />
+      );
+    }
+    const { stdin } = renderWithProvider(<Paged />);
+    stdin.write("\x1b[5~");
+    await new Promise((r) => setTimeout(r, 30));
+    stdin.write("\x1b[6~");
+    await new Promise((r) => setTimeout(r, 30));
+    // 8 rows: the "↑ earlier" line + 7 messages, so a page is 6 (one message
+    // overlaps). Mid-list both indicators show, leaving 6 messages: a page of 5.
+    expect(moves).toEqual([23, 28]);
+  });
+});
+
+describe("MessageView load-older row", () => {
+  it("budgets its own row instead of colliding with the day label", () => {
+    const messages: Message[] = Array.from({ length: 7 }, (_, i) => ({
+      id: i + 1,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${i + 1}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }));
+    // 8 rows: exactly the day label + 7 messages, with no room for the load-older line
+    const frame =
+      renderWithProvider(
+        <MessageView
+          isFocused
+          selectedChatTitle="Alice"
+          messages={messages}
+          selectedIndex={0}
+          canLoadOlder
+          width={50}
+          height={12}
+          dispatch={mockDispatch}
+          messageLayout="classic"
+          isGroupChat={false}
+          chatId="1"
+          sendReaction={mockSendReaction}
+          removeReaction={mockRemoveReaction}
+          onRetryDelivery={mockRetryDelivery}
+          onLoadOlder={mockLoadOlder}
+          reactionOverlay={null}
+        />,
+      ).lastFrame() ?? "";
+    const lines = frame.split("\n");
+    const older = lines.findIndex((l) => l.includes("Press Enter to load older messages"));
+    expect(older).toBeGreaterThan(0);
+    expect(lines[older + 1]).toContain("── Jan 15, 2024 ──");
+    expect(lines[older + 2]).toContain("message 1");
+  });
+});
+
+describe("MessageView review regressions", () => {
+  const msg = (id: number, overrides: Partial<Message> = {}): Message => ({
+    id,
+    senderId: `user${id}`,
+    senderName: "Alice",
+    text: `message ${id}`,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+    ...overrides,
+  });
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Group"
+      messages={[]}
+      selectedIndex={0}
+      width={40}
+      height={12}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+
+  it("Ctrl+R and Ctrl+K don't also react or move the selection", async () => {
+    const actions: string[] = [];
+    const moves: number[] = [];
+    const messages = [msg(1), msg(2), msg(3)];
+    const { stdin } = renderWithProvider(
+      view({
+        messages,
+        selectedIndex: 2,
+        dispatch: (action) => actions.push(action.type),
+        setSelectedIndex: (index) => moves.push(index),
+      }),
+    );
+    stdin.write("\x12");
+    stdin.write("\x0b");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(actions).not.toContain("SET_REACTION_OVERLAY");
+    expect(moves).toEqual([]);
+  });
+
+  it("long bubble names and reply names stay on one row", () => {
+    const longName = "Alexander Konstantinopoulos-Smithson";
+    const messages = Array.from({ length: 6 }, (_, i) =>
+      msg(i + 1, { senderName: longName, replyToMsgId: i || undefined, replyToSenderName: longName }),
+    );
+    const frame =
+      renderWithProvider(
+        view({ messages, selectedIndex: 5, width: 30, messageLayout: "bubble", isGroupChat: true }),
+      ).lastFrame() ?? "";
+    expect(frame).toMatch(/↑ \d+ earlier/);
+    expect(frame).toContain("message 6");
+  });
+
+  it("shows the start of a message taller than the panel", () => {
+    const tall = msg(2, { text: Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n") });
+    const frame = renderWithProvider(view({ messages: [msg(1), tall], selectedIndex: 1 })).lastFrame() ?? "";
+    expect(frame).toContain("Alice: line 1");
+  });
+
+  it("renders tabs as spaces so lines stay inside the border", () => {
+    const frame =
+      renderWithProvider(view({ messages: [msg(1, { text: "a\tb" })], selectedIndex: 0 })).lastFrame() ?? "";
+    expect(frame).toContain("a    b");
+    expect(frame).not.toContain("\t");
+  });
+});
+
+
+describe("MessageView reactions", () => {
+  const messages = [1, 2, 3].map(
+    (id): Message => ({
+      id,
+      senderId: "user1",
+      senderName: "Alice",
+      text: `message ${id}`,
+      timestamp: new Date("2024-01-15T10:30:00"),
+      isOutgoing: false,
+    }),
+  );
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Alice"
+      messages={messages}
+      selectedIndex={2}
+      width={50}
+      height={20}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+
+  it("centers the full grid in place of the messages", () => {
+    const lines = renderWithProvider(view({ reactionOverlay: { kind: "modal", messageId: 3 } })).lastFrame()!.split("\n");
+    expect(lines.join("\n")).not.toContain("message 3");
+    expect(lines.join("\n")).toContain("[Cancel]");
+    // 16 rows under the header hold the 11-row grid with 3 above and 2 below,
+    // and the 28-column grid sits 10 columns in from each side
+    expect(lines.findIndex((line) => line.includes("╭", 1))).toBe(6);
+    expect(lines.findIndex((line) => line.includes("╯", 1) && !line.startsWith("╰"))).toBe(16);
+    expect(lines[6]!.indexOf("╭", 1)).toBe(11);
+    expect(lines[6]!.length - 1 - lines[6]!.lastIndexOf("╮")).toBe(11);
+  });
+
+  it("drops the title and [Cancel] when the panel is short, keeping the emoji", () => {
+    const frame = renderWithProvider(view({ height: 8, reactionOverlay: { kind: "modal", messageId: 3 } })).lastFrame()!;
+    expect(frame.split("\n")).toHaveLength(8);
+    expect(frame).not.toContain("React");
+    expect(frame).not.toContain("[Cancel]");
+    expect(frame).toContain("👍");
+  });
+
+  it("scrolls the quick picker in a narrow panel instead of wrapping it", () => {
+    const frame = renderWithProvider(view({ width: 30, reactionOverlay: { kind: "picker", messageId: 3 } })).lastFrame()!;
+    const pickerRow = frame.split("\n").find((line) => line.includes("👍"))!;
+    expect(pickerRow).toContain("›");
+    expect(frame).not.toContain("[...]");
+    expect(frame).toContain("message 2");
+  });
+});
+
+describe("MessageView tall messages", () => {
+  const msg = (id: number, text: string): Message => ({
+    id,
+    senderId: "user1",
+    senderName: "Alice",
+    text,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+  });
+  const tall = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+  // Generous: a slow, busy machine still renders between key presses
+  const tick = () => new Promise((r) => setTimeout(r, 60));
+
+  // height 12 leaves 8 message rows: one for "↑ earlier", one for what's left below
+  function Harness({
+    messages,
+    initialIndex,
+    loadStatus,
+  }: {
+    messages: Message[];
+    initialIndex: number;
+    loadStatus?: React.ComponentProps<typeof MessageView>["loadStatus"];
+  }) {
+    const [selectedIndex, setSelectedIndex] = React.useState(initialIndex);
+    return (
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={messages}
+        selectedIndex={selectedIndex}
+        setSelectedIndex={setSelectedIndex}
+        loadStatus={loadStatus}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />
+    );
+  }
+
+  it("scrolls through a message taller than the panel before moving on", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, "short"), msg(2, tall)]} initialIndex={1} />);
+    // 12 lines in 6 rows: it opens at its top with 6 to go
+    expect(lastFrame()).toMatch(/line 1 /);
+    expect(lastFrame()).toContain("↓ 6 more lines");
+
+    stdin.write("j");
+    await tick();
+    expect(lastFrame()).toContain("↓ 5 more lines");
+    expect(lastFrame()).not.toMatch(/line 1 /);
+
+    stdin.write("\x1b[6~");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toContain("more lines");
+
+    for (let i = 0; i < 6; i++) {
+      stdin.write("k");
+      await tick();
+    }
+    expect(lastFrame()).toContain("↓ 6 more lines");
+    expect(lastFrame()).toContain("(2/2)");
+
+    stdin.write("k");
+    await tick();
+    expect(lastFrame()).toContain("(1/2)");
+  });
+
+  it("shows a tall message's end when stepping up into it, and its top after a jump", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, tall), msg(2, "short")]} initialIndex={1} />);
+    stdin.write("k");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toMatch(/line 1 /);
+
+    stdin.write("G");
+    await tick();
+    stdin.write("g");
+    await tick();
+    expect(lastFrame()).toMatch(/line 1 /);
+    expect(lastFrame()).toContain("↓ 6 more lines");
+  });
+
+  it("G and g reach the end and top of a long message that's already selected", async () => {
+    const { lastFrame, stdin } = renderWithProvider(<Harness messages={[msg(1, "short"), msg(2, tall)]} initialIndex={1} />);
+    stdin.write("G");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    expect(lastFrame()).not.toContain("more lines");
+  });
+
+  it("reports lines left below, so the app keeps the selection for new messages", async () => {
+    const reports: boolean[] = [];
+    const { stdin } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[msg(1, tall)]}
+        selectedIndex={0}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+        onLinesBelowChange={(linesBelow) => reports.push(linesBelow)}
+      />,
+    );
+    await tick();
+    stdin.write("G");
+    await tick();
+    expect(reports).toEqual([true, false]);
+  });
+
+  it("has nothing to scroll while the quick picker stands in for the message", () => {
+    const frame = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[msg(1, "short"), msg(2, tall)]}
+        selectedIndex={1}
+        width={40}
+        height={12}
+        dispatch={mockDispatch}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={{ kind: "picker", messageId: 2 }}
+      />,
+    ).lastFrame()!;
+    expect(frame).toContain("👍");
+    expect(frame).not.toContain("more lines");
+  });
+
+  it("keeps every row whole on a panel with room for 2", () => {
+    for (const selectedIndex of [0, 1]) {
+      const frame = renderWithProvider(
+        <MessageView
+          isFocused
+          selectedChatTitle="Alice"
+          messages={[msg(1, tall), msg(2, tall)]}
+          selectedIndex={selectedIndex}
+          canLoadOlder={selectedIndex === 0}
+          width={40}
+          height={6}
+          dispatch={mockDispatch}
+          messageLayout="classic"
+          isGroupChat={false}
+          chatId="1"
+          sendReaction={mockSendReaction}
+          removeReaction={mockRemoveReaction}
+          onRetryDelivery={mockRetryDelivery}
+          onLoadOlder={mockLoadOlder}
+          reactionOverlay={null}
+        />,
+      ).lastFrame()!;
+      // The top row and one message row: no "↓ more lines" written over them
+      expect(frame.split("\n")).toHaveLength(6);
+      expect(frame).not.toContain("more line");
+      expect(frame.split("\n")[3]).toMatch(selectedIndex === 0 ? /load older/ : /1 earlier/);
+    }
+  });
+
+  it("starts at the top again in another chat with the same message ids", async () => {
+    function Switcher() {
+      const [chatId, setChatId] = React.useState("1");
+      const [selectedIndex, setSelectedIndex] = React.useState(1);
+      return (
+        <>
+          <MessageView
+            isFocused
+            selectedChatTitle="Alice"
+            messages={[msg(1, "short"), msg(2, tall)]}
+            selectedIndex={selectedIndex}
+            setSelectedIndex={setSelectedIndex}
+            width={40}
+            height={12}
+            dispatch={mockDispatch}
+            messageLayout="classic"
+            isGroupChat={false}
+            chatId={chatId}
+            sendReaction={mockSendReaction}
+            removeReaction={mockRemoveReaction}
+            onRetryDelivery={mockRetryDelivery}
+            onLoadOlder={mockLoadOlder}
+            reactionOverlay={null}
+          />
+          <SwitchOnX onSwitch={() => setChatId((id) => (id === "1" ? "2" : "1"))} />
+        </>
+      );
+    }
+    function SwitchOnX({ onSwitch }: { onSwitch: () => void }) {
+      useInput((input) => {
+        if (input === "x") onSwitch();
+      });
+      return null;
+    }
+    const { lastFrame, stdin } = renderWithProvider(<Switcher />);
+    stdin.write("G");
+    await tick();
+    expect(lastFrame()).toContain("line 12");
+    stdin.write("x");
+    await tick();
+    stdin.write("x");
+    await tick();
+    expect(lastFrame()).toMatch(/line 1 /);
+  });
+
+  it("navigation keys do nothing in a chat with no messages", async () => {
+    for (const loadStatus of ["loading", "error", "ready"] as const) {
+      const { lastFrame, stdin } = renderWithProvider(<Harness messages={[]} initialIndex={0} loadStatus={loadStatus} />);
+      for (const key of ["g", "\x1b[H", "G", "\x1b[F", "j", "k", "\x1b[5~", "\x1b[6~"]) {
+        stdin.write(key);
+        await tick();
+      }
+      expect(lastFrame()).toContain(loadStatus === "loading" ? "Loading messages" : loadStatus === "error" ? "Couldn't load" : "No messages yet");
+    }
+  });
+
+  it("Enter in a chat with no messages still goes to the input", async () => {
+    const actions: unknown[] = [];
+    const { stdin } = renderWithProvider(
+      <MessageView
+        isFocused
+        selectedChatTitle="Alice"
+        messages={[]}
+        selectedIndex={0}
+        width={40}
+        height={12}
+        dispatch={(action) => actions.push(action)}
+        messageLayout="classic"
+        isGroupChat={false}
+        chatId="1"
+        sendReaction={mockSendReaction}
+        removeReaction={mockRemoveReaction}
+        onRetryDelivery={mockRetryDelivery}
+        onLoadOlder={mockLoadOlder}
+        reactionOverlay={null}
+      />,
+    );
+    stdin.write("\r");
+    await tick();
+    expect(actions).toContainEqual({ type: "SET_FOCUSED_PANEL", payload: "input" });
+  });
+});
+
+describe("MessageView replies, forwards and media", () => {
+  const msg = (id: number, overrides: Partial<Message> = {}): Message => ({
+    id,
+    senderId: "alice",
+    senderName: "Alice",
+    text: `message ${id}`,
+    timestamp: new Date("2024-01-15T10:30:00"),
+    isOutgoing: false,
+    ...overrides,
+  });
+  const media = (fields: Omit<NonNullable<Message["media"]>, "_message">) => ({ ...fields, _message: {} as never });
+  const view = (props: Partial<React.ComponentProps<typeof MessageView>>) => (
+    <MessageView
+      isFocused
+      selectedChatTitle="Alice"
+      messages={[]}
+      selectedIndex={0}
+      width={70}
+      height={14}
+      dispatch={mockDispatch}
+      messageLayout="classic"
+      isGroupChat={false}
+      chatId="1"
+      sendReaction={mockSendReaction}
+      removeReaction={mockRemoveReaction}
+      onRetryDelivery={mockRetryDelivery}
+      onLoadOlder={mockLoadOlder}
+      reactionOverlay={null}
+      {...props}
+    />
+  );
+  // Names and labels keep together with no-break spaces
+  const text = (shown: string | undefined) => (shown ?? "").replace(/\u00A0/g, " ");
+  const frame = (props: Partial<React.ComponentProps<typeof MessageView>>) => text(renderWithProvider(view(props)).lastFrame());
+
+  it("names who a live reply answers, from the messages loaded", () => {
+    const messages = [msg(1, { senderId: "me", senderName: "Max", isOutgoing: true }), msg(2, { replyToMsgId: 1 })];
+    expect(frame({ messages, selectedIndex: 1 })).toContain("↩You: Alice: message 2");
+    expect(frame({ messages, selectedIndex: 1, messageLayout: "bubble" })).toContain("↩ You");
+  });
+
+  it("shows who a forward is from, in both layouts", () => {
+    const messages = [msg(1, { forwardedFrom: "SpaceX", text: "launch Friday" })];
+    expect(frame({ messages })).toContain("Alice: ↪ from SpaceX: launch Friday");
+    expect(frame({ messages, messageLayout: "bubble" })).toContain("↪ Forwarded from SpaceX");
+  });
+
+  it("labels polls, places and files that used to show up empty", () => {
+    const messages = [
+      msg(1, { text: "", media: media({ type: "poll", title: "Lunch?" }) }),
+      msg(2, { text: "", media: media({ type: "location", title: "Cafe, Main St 1" }) }),
+      msg(3, { text: "notes", media: media({ type: "document", fileName: "report.pdf", fileSize: 2048 }) }),
+    ];
+    const shown = frame({ messages, selectedIndex: 2 });
+    expect(shown).toContain("[📊 Poll: Lunch?]");
+    expect(shown).toContain("[📍 Location: Cafe, Main St 1]");
+    expect(shown).toContain("[📄 report.pdf: 2.0KB] notes");
+  });
+
+  it("offers to view only what the media panel can draw", async () => {
+    for (const [attachment, viewable] of [
+      [media({ type: "photo" }), true],
+      [media({ type: "video", duration: 5 }), true],
+      [media({ type: "poll", title: "Lunch?" }), false],
+      [media({ type: "document", fileName: "a.pdf", mimeType: "application/pdf" }), false],
+    ] as const) {
+      const actions: string[] = [];
+      const { lastFrame, stdin } = renderWithProvider(
+        view({ messages: [msg(1, { media: attachment })], dispatch: (action) => actions.push(action.type) }),
+      );
+      expect((lastFrame() ?? "").includes("[Press enter to view]")).toBe(viewable);
+      stdin.write("\r");
+      await new Promise((r) => setTimeout(r, 30));
+      expect(actions.includes("OPEN_MEDIA_PANEL")).toBe(viewable);
+    }
+  });
+
+  it("reports the newest message on screen, for read sync", () => {
+    const seen: Array<[string, number]> = [];
+    const messages = Array.from({ length: 30 }, (_, i) => msg(i + 1));
+    const shown = text(renderWithProvider(view({ messages, selectedIndex: 2, onSeen: (chatId, id) => seen.push([chatId, id]) })).lastFrame());
+    const newestShown = Math.max(...[...shown.matchAll(/message (\d+)/g)].map((m) => Number(m[1])));
+    // The top of a long chat, not its end
+    expect(newestShown).toBeLessThan(30);
+    expect(seen.at(-1)).toEqual(["1", newestShown]);
+  });
+
+  it("reports nothing while the emoji grid covers the messages", () => {
+    const seen: number[] = [];
+    renderWithProvider(
+      view({ messages: [msg(1)], reactionOverlay: { kind: "modal", messageId: 1 }, onSeen: (_chatId, id) => seen.push(id) }),
+    );
+    expect(seen).toEqual([]);
   });
 });

@@ -1,14 +1,20 @@
 import { memo, useMemo, useState, useCallback, useEffect, type Dispatch } from "react";
 import { useInput } from "ink";
+import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import { Box, Text, useSkin } from "./ui";
-import type { Message, MessageLayout } from "../types";
+import type { LoadStatus, Message, MessageLayout } from "../types";
 import { formatMediaMetadata } from "../services/imageRenderer.js";
-import type { AppAction } from "../state/reducer.js";
+import { canViewMedia } from "../utils/media.js";
+import type { AppAction, ReactionOverlay } from "../state/reducer.js";
+import { Logo, LOGO_COLS, LOGO_ROWS } from "./Logo";
 import { ReactionPicker, QUICK_EMOJIS } from "./ReactionPicker";
 import { ReactionModal } from "./ReactionModal";
 import { useFlash } from "../hooks/useFlash.js";
 import { useTelegramService } from "../state/context.js";
 import { FLASH_CONFIG } from "../config/flashConfig.js";
+import { getSenderColor, type SenderColors } from "../utils/senderColor.js";
+import { formatDayLabel, formatTime, isSameDay } from "../utils/formatDate.js";
 
 interface MessageViewProps {
   isFocused: boolean;
@@ -16,6 +22,7 @@ interface MessageViewProps {
   messages: Message[];
   selectedIndex: number;
   isLoadingOlder?: boolean;
+  loadStatus?: LoadStatus;
   canLoadOlder?: boolean;
   width: number;
   height?: number;
@@ -23,6 +30,7 @@ interface MessageViewProps {
   messageLayout: MessageLayout;
   isGroupChat: boolean;
   chatId: string | null;
+  senderColors?: SenderColors;
   setSelectedIndex?: (index: number) => void;
   sendReaction: (
     chatId: string,
@@ -30,51 +38,20 @@ interface MessageViewProps {
     emoji: string,
   ) => Promise<boolean>;
   removeReaction: (chatId: string, messageId: number) => Promise<boolean>;
+  onRetryDelivery: (chatId: string, message: Message) => void;
+  onLoadOlder: () => void;
+  reactionOverlay: ReactionOverlay;
   isTyping?: boolean;
+  /** Whether the selected message, taller than the panel, has lines below the view */
+  onLinesBelowChange?: (linesBelow: boolean) => void;
+  /** The newest message on screen, for read sync */
+  onSeen?: (chatId: string, messageId: number) => void;
 }
 
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
+// Rows a line takes once Ink wraps it: Ink wraps with this same wrap-ansi call
 export function countWrappedLines(line: string, width: number): number {
-  if (width <= 0 || line.length <= width) return 1;
-  const words = line.split(" ");
-  let rows = 1;
-  let col = 0; // characters used on the current row
-  for (const word of words) {
-    if (word.length === 0) {
-      // Empty token = a space char (leading space or a run of spaces); it occupies one column.
-      if (col + 1 <= width) {
-        col += 1;
-      } else {
-        rows++;
-        col = 1;
-      }
-      continue;
-    }
-    if (word.length > width) {
-      // Long word hard-wraps onto its own rows.
-      if (col > 0) rows++;
-      const wordRows = Math.ceil(word.length / width);
-      rows += wordRows - 1;
-      const rem = word.length % width;
-      col = rem === 0 ? width : rem;
-      continue;
-    }
-    const needed = col === 0 ? word.length : col + 1 + word.length;
-    if (needed <= width) {
-      col = needed;
-    } else {
-      rows++;
-      col = word.length;
-    }
-  }
-  return rows;
+  if (width <= 0) return 1;
+  return wrapAnsi(line, width, { trim: false, hard: true }).split("\n").length;
 }
 
 function formatReactions(reactions: Message["reactions"]): string {
@@ -87,66 +64,117 @@ function formatReactions(reactions: Message["reactions"]): string {
   );
 }
 
+// "…" while a send/edit is in flight, "!" once it failed
+function formatDelivery(msg: Message): string {
+  if (!msg.delivery) return "";
+  if (msg.delivery.status === "pending") return " …";
+  return msg.delivery.action === "send" ? " ! not sent" : " ! edit not saved";
+}
+
+function formatRetryHint(msg: Message, isSelected: boolean): string {
+  if (!isSelected || msg.delivery?.status !== "failed") return "";
+  return msg.delivery.action === "send" ? " [Enter: retry · x: discard]" : " [Enter: retry · x: undo]";
+}
+
+// Unsent messages have no server id yet, so they can't be replied or reacted to
+function isUnsent(msg: Message): boolean {
+  return msg.delivery?.action === "send";
+}
+
 function hasUserReaction(reactions: Message["reactions"]): boolean {
   return reactions?.some((r) => r.hasUserReacted) ?? false;
 }
 
-function getMessageLineCount(msg: Message, _isSelected: boolean, availableWidth: number): number {
-  const lines = msg.text.split("\n");
-  if (availableWidth <= 0) return lines.length;
-  // The first rendered line carries the "[HH:MM] Sender: " prefix (+ optional reply
-  // prefix, media info) and any reactions suffix; continuation \n-lines are indented
-  // 8 spaces. Include them so the count matches Ink's actual wrapping and the visible
-  // window doesn't over-pack and clip the bottom message.
+const CONTINUATION_INDENT = "        ";
+
+// Ink measures a tab as 0 columns but the terminal expands it, which would
+// spill past the border, so render tabs as spaces
+function splitLines(text: string): string[] {
+  return text.replace(/\t/g, "    ").split("\n");
+}
+
+const keepTogether = (text: string) => text.replace(/ /g, "\u00A0");
+
+function hasViewableMedia(msg: Message): boolean {
+  return !!msg.media && canViewMedia(msg.media);
+}
+
+// Reply names come from the messages loaded here: live messages arrive
+// without one, and a page loaded later can name what was missing
+function withReplyNames(messages: Message[]): Message[] {
+  const names = new Map(messages.map((m) => [m.id, m.isOutgoing ? "You" : m.senderName]));
+  return messages.map((m) => {
+    if (!m.replyToMsgId) return m;
+    const name = names.get(m.replyToMsgId) ?? m.replyToSenderName;
+    return name === m.replyToSenderName ? m : { ...m, replyToSenderName: name };
+  });
+}
+
+// A classic first line's pieces, in render order. They're styled separately,
+// but Ink wraps them as one string, so counting joins them the same way.
+function getClassicFirstLine(msg: Message, text: string, isSelected: boolean) {
   const senderName = msg.isOutgoing ? "You" : msg.senderName;
-  const replyPrefix = msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}: ` : "";
-  const mediaInfo = msg.media ? ` ${formatMediaMetadata(msg.media, msg.id)}` : "";
-  const firstPrefix = `[${formatTime(msg.timestamp)}] ${replyPrefix}${senderName}:${mediaInfo} `;
-  const reactions = formatReactions(msg.reactions);
-  let total = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const content = i === 0 ? firstPrefix + lines[i] + reactions : "        " + lines[i];
-    total += countWrappedLines(content, availableWidth);
-  }
-  return total;
+  return {
+    time: `[${formatTime(msg.timestamp)}]\u00A0`,
+    reply: msg.replyToMsgId ? `↩${msg.replyToSenderName ?? "Unknown"}:\u00A0` : "",
+    name: `${keepTogether(senderName)}:`,
+    forward: msg.forwardedFrom ? ` ↪\u00A0from ${msg.forwardedFrom}:` : "",
+    media: msg.media ? ` ${formatMediaMetadata(msg.media)}` : "",
+    text: ` ${text}`,
+    viewHint: isSelected && hasViewableMedia(msg) ? " [Press enter to view]" : "",
+    reactions: formatReactions(msg.reactions),
+    delivery: formatDelivery(msg),
+    retryHint: formatRetryHint(msg, isSelected),
+  };
 }
 
-function getBubbleMessageLineCount(msg: Message, isGroupChat: boolean, availableWidth: number): number {
-  const hasName = isGroupChat && !msg.isOutgoing;
-  if (!msg.text) return (hasName ? 1 : 0) + 1;
-  const lines = msg.text.split("\n");
-  let textLines = 0;
-  if (availableWidth <= 0) {
-    textLines = lines.length;
-  } else {
-    for (const line of lines) {
-      textLines += countWrappedLines(line, availableWidth);
-    }
-  }
-  // name line (if group + not outgoing) + text lines (timestamp is inline on last line)
-  return (hasName ? 1 : 0) + Math.max(1, textLines);
+function getMessageLineCount(msg: Message, isSelected: boolean, availableWidth: number): number {
+  const [first = "", ...rest] = splitLines(msg.text);
+  const firstLine = Object.values(getClassicFirstLine(msg, first, isSelected)).join("");
+  return rest.reduce(
+    (rows, line) => rows + countWrappedLines(CONTINUATION_INDENT + line, availableWidth),
+    countWrappedLines(firstLine, availableWidth),
+  );
 }
 
-// 10 distinct colors for senders (no blue - that's for you)
-const SENDER_COLORS = [
-  "green",
-  "yellow",
-  "magenta",
-  "red",
-  "cyan",
-  "white",
-  "greenBright",
-  "yellowBright",
-  "magentaBright",
-  "redBright",
-] as const;
+// Bubble text lines (media info on the first) and the last line's suffix pieces
+function getBubbleContent(msg: Message, isSelected: boolean) {
+  const mediaInfo = msg.media ? formatMediaMetadata(msg.media) : "";
+  const viewHint = isSelected && hasViewableMedia(msg) ? " [Enter]" : "";
+  const lines = splitLines(msg.text).map((line, i) =>
+    // A blank line still takes its counted row
+    i === 0 && mediaInfo ? `${line} ${mediaInfo}${viewHint}`.trim() : line || " ",
+  );
+  const suffix = {
+    timestamp: ` [${formatTime(msg.timestamp)}]`,
+    delivery: formatDelivery(msg),
+    retryHint: formatRetryHint(msg, isSelected),
+    reactions: formatReactions(msg.reactions),
+  };
+  const fullLines = lines.map((line, i) => (i === lines.length - 1 ? line + Object.values(suffix).join("") : line));
+  return { lines, suffix, fullLines };
+}
+
+function getBubbleMessageLineCount(
+  msg: Message,
+  isSelected: boolean,
+  isGroupChat: boolean,
+  availableWidth: number,
+): number {
+  const nameRows = isGroupChat && !msg.isOutgoing ? 1 : 0;
+  const replyRows = msg.replyToMsgId ? 1 : 0;
+  const forwardRows = msg.forwardedFrom ? 1 : 0;
+  const { fullLines } = getBubbleContent(msg, isSelected);
+  return fullLines.reduce((rows, line) => rows + countWrappedLines(line, availableWidth), nameRows + replyRows + forwardRows);
+}
 
 function MessageViewInner({
   isFocused,
   selectedChatTitle,
-  messages: chatMessages,
+  messages: loadedMessages,
   selectedIndex,
   isLoadingOlder = false,
+  loadStatus = "ready",
   canLoadOlder = false,
   width,
   height = 24,
@@ -154,19 +182,39 @@ function MessageViewInner({
   messageLayout,
   isGroupChat,
   chatId,
+  senderColors,
   setSelectedIndex,
   sendReaction,
   removeReaction,
+  onRetryDelivery,
+  onLoadOlder,
+  reactionOverlay,
   isTyping,
+  onLinesBelowChange,
+  onSeen,
 }: MessageViewProps) {
   const skin = useSkin();
+  const chatMessages = useMemo(() => withReplyNames(loadedMessages), [loadedMessages]);
   // panelDividers skins drop the left/right/outer-top/bottom border, leaving
   // only the header row + its divider (no outer border rows to subtract).
   const visibleLines = Math.max(1, height - (skin.panelDividers ? 2 : 4));
   // Reaction picker state
-  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  // Open state lives in the app reducer so global keys can stand down
+  const reactionPickerOpen = reactionOverlay?.kind === "picker";
+  const reactionModalOpen = reactionOverlay?.kind === "modal";
+  const setReactionOverlay = useCallback(
+    (overlay: ReactionOverlay) => dispatch({ type: "SET_REACTION_OVERLAY", payload: overlay }),
+    [dispatch],
+  );
   const [reactionPickerIndex, setReactionPickerIndex] = useState(0);
-  const [reactionModalOpen, setReactionModalOpen] = useState(false);
+  // How far a message taller than the panel is scrolled; it starts at its top
+  const [messageScroll, setMessageScroll] = useState<{ messageId: number; offset: number } | null>(null);
+  // Another chat starts fresh, even if it has a message with the same id
+  const [scrollChatId, setScrollChatId] = useState(chatId);
+  if (scrollChatId !== chatId) {
+    setScrollChatId(chatId);
+    setMessageScroll(null);
+  }
   const [flashState, setFlashState] = useState<{
     messageId: number;
     color: string;
@@ -177,43 +225,40 @@ function MessageViewInner({
   const { startFlash: startIndicatorFlash, isFlashing: isIndicatorFlashing } = useFlash();
   const telegramService = useTelegramService();
 
-  // Check if user is viewing the bottom of messages
-  const isAtBottom = useMemo(() => {
-    return selectedIndex >= chatMessages.length - 1;
-  }, [selectedIndex, chatMessages.length]);
-
-  // Subscribe to new messages for this chat
-  useEffect(() => {
-    const unsub = telegramService?.onNewMessage((message, incomingChatId) => {
-      if (message.isOutgoing || incomingChatId !== chatId) return;
-
-      if (isAtBottom) {
-        startMsgFlash(message.id, FLASH_CONFIG.messageFlashCount);
-      } else {
-        // Flash the "↓ X more" indicator and increment unread count
-        startIndicatorFlash("scroll-indicator", FLASH_CONFIG.indicatorFlashCount);
-        if (chatId) {
-          dispatch({ type: "INCREMENT_UNREAD", payload: { chatId } });
-        }
-      }
-    });
-    return unsub;
-  }, [telegramService, chatId, isAtBottom, startMsgFlash, startIndicatorFlash, dispatch]);
-
-  // Clear unread count when user scrolls to bottom
-  useEffect(() => {
-    if (isAtBottom && chatId) {
-      dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
-    }
-  }, [isAtBottom, chatId, dispatch]);
-
-  // Handle 'r' key for reactions, 'R' (Shift+R) for reply, and Enter for media panel
+  // Message keys: moving the selection, 'r' react, 'R' reply, 'x' discard unsent, Enter (sole owner)
   useInput(
     (input, key) => {
+      // Ctrl/Alt chords arrive as their letter (Ctrl+R as "r"): they belong to App
+      if (key.ctrl || key.meta) return;
+      // Empty, loading or failed: nothing to move to or act on, but Enter
+      // still goes to the input
+      const selectedMessage = chatMessages[selectedIndex];
+      if (!selectedMessage && !key.return) return;
+      // A tall message shows its top, or its end when stepping up into it
+      const moveTo = (index: number, fromEnd = false) => {
+        const target = Math.max(0, Math.min(chatMessages.length - 1, index));
+        if (chatMessages.length === 0 || target === selectedIndex) return;
+        setMessageScroll(fromEnd ? { messageId: chatMessages[target]!.id, offset: Number.MAX_SAFE_INTEGER } : null);
+        setSelectedIndex?.(target);
+      };
+      // A tall message scrolls through its own lines before the selection moves
+      const scrollTo = (offset: number) => {
+        if (selectedMessage) setMessageScroll({ messageId: selectedMessage.id, offset: Math.max(0, Math.min(maxScroll, offset)) });
+      };
+      // A page keeps one message of overlap for context
+      const pageSize = Math.max(1, endIndex - startIndex - 1);
+      const linePage = Math.max(1, tallRows - 1);
+      if (key.upArrow || input === "k") return scrollOffset > 0 ? scrollTo(scrollOffset - 1) : moveTo(selectedIndex - 1, true);
+      if (key.downArrow || input === "j") return scrollOffset < maxScroll ? scrollTo(scrollOffset + 1) : moveTo(selectedIndex + 1);
+      if (key.pageUp) return scrollOffset > 0 ? scrollTo(scrollOffset - linePage) : moveTo(selectedIndex - pageSize, true);
+      if (key.pageDown) return scrollOffset < maxScroll ? scrollTo(scrollOffset + linePage) : moveTo(selectedIndex + pageSize);
+      // Already there: to the top or end of a long message
+      if (key.home || input === "g") return selectedIndex === 0 ? scrollTo(0) : moveTo(0);
+      if (key.end || input === "G") return selectedIndex === chatMessages.length - 1 ? scrollTo(maxScroll) : moveTo(chatMessages.length - 1);
+
       // Shift+R for reply (uppercase R)
       if (input === "R") {
-        const selectedMessage = chatMessages[selectedIndex];
-        if (selectedMessage) {
+        if (selectedMessage && !isUnsent(selectedMessage)) {
           dispatch({ type: "SET_REPLYING_TO", payload: selectedMessage });
           dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
         }
@@ -222,21 +267,39 @@ function MessageViewInner({
 
       // 'r' key for reactions (lowercase only now)
       if (input === "r") {
-        const selectedMessage = chatMessages[selectedIndex];
-        if (selectedMessage) {
+        if (selectedMessage && !isUnsent(selectedMessage)) {
           if (hasUserReaction(selectedMessage.reactions)) {
             handleRemoveReaction(selectedMessage.id);
           } else {
-            setReactionPickerOpen(true);
+            setReactionOverlay({ kind: "picker", messageId: selectedMessage.id });
             setReactionPickerIndex(0);
           }
         }
         return;
       }
 
-      // Enter handling: reply navigation OR media panel
+      // Discard a failed send, or undo a failed edit
+      if (input === "x") {
+        if (selectedMessage?.delivery?.status === "failed" && chatId) {
+          dispatch({ type: "DISCARD_UNSENT", payload: { chatId, messageId: selectedMessage.id } });
+          dispatch({ type: "CLEAR_NOTICE" });
+        }
+        return;
+      }
+
+      // Enter: retry a failed message, load older at the top, jump to the
+      // replied message, open media, or else move to the input
       if (key.return) {
-        const selectedMessage = chatMessages[selectedIndex];
+
+        if (selectedMessage?.delivery?.status === "failed" && chatId) {
+          onRetryDelivery(chatId, selectedMessage);
+          return;
+        }
+
+        if (canLoadOlder) {
+          onLoadOlder();
+          return;
+        }
 
         // If this is a reply message, navigate to original
         if (selectedMessage?.replyToMsgId && setSelectedIndex) {
@@ -244,19 +307,21 @@ function MessageViewInner({
             (m) => m.id === selectedMessage.replyToMsgId
           );
           if (originalIndex >= 0) {
-            setSelectedIndex(originalIndex);
+            moveTo(originalIndex);
             startMsgFlash(selectedMessage.replyToMsgId, FLASH_CONFIG.messageFlashCount);
             return;
           }
         }
 
-        // Otherwise, open media panel if message has media
-        if (selectedMessage?.media) {
+        if (selectedMessage && hasViewableMedia(selectedMessage)) {
           dispatch({
             type: "OPEN_MEDIA_PANEL",
             payload: { messageId: selectedMessage.id },
           });
+          return;
         }
+
+        dispatch({ type: "SET_FOCUSED_PANEL", payload: "input" });
       }
     },
     { isActive: isFocused && !reactionPickerOpen && !reactionModalOpen },
@@ -277,11 +342,10 @@ function MessageViewInner({
   // Reaction handlers
   const handleSendReaction = useCallback(
     async (emoji: string) => {
-      const messageId = chatMessages[selectedIndex]?.id;
-      if (!messageId || !chatId) return;
+      const messageId = reactionOverlay?.messageId;
+      if (messageId === undefined || !chatId) return;
 
-      setReactionPickerOpen(false);
-      setReactionModalOpen(false);
+      setReactionOverlay(null);
 
       // Optimistic update
       dispatch({ type: "ADD_REACTION", payload: { chatId, messageId, emoji } });
@@ -309,7 +373,7 @@ function MessageViewInner({
         }, 200);
       }
     },
-    [chatMessages, selectedIndex, chatId, dispatch, sendReaction],
+    [reactionOverlay, chatId, dispatch, sendReaction, setReactionOverlay],
   );
 
   const handleRemoveReaction = useCallback(
@@ -352,46 +416,35 @@ function MessageViewInner({
     [chatId, chatMessages, dispatch, removeReaction],
   );
 
-  // Build color map: assign colors to senders in order of first appearance
-  const senderColorMap = useMemo(() => {
-    const map = new Map<string, (typeof SENDER_COLORS)[number]>();
-    let colorIndex = 0;
-    for (const msg of chatMessages) {
-      if (!msg.isOutgoing && !map.has(msg.senderId)) {
-        map.set(
-          msg.senderId,
-          SENDER_COLORS[colorIndex % SENDER_COLORS.length]!,
-        );
-        colorIndex++;
-      }
-    }
-    return map;
-  }, [chatMessages]);
-
-  // Get color for a sender
-  const getSenderColor = (senderId: string) => {
-    return senderColorMap.get(senderId) ?? "white";
-  };
-
   // Calculate line count for each message
   // panelDividers skins have no left/right border columns, only paddingX.
   const contentWidth = width - (skin.panelDividers ? 2 : 4);
+  // A day label above the first message of each day
+  const daySeparators = useMemo(() => {
+    const now = new Date();
+    return chatMessages.map((msg, index) => {
+      const previous = chatMessages[index - 1];
+      return previous && isSameDay(previous.timestamp, msg.timestamp) ? null : formatDayLabel(msg.timestamp, now);
+    });
+  }, [chatMessages]);
+
   const messageLineCounts = useMemo(() => {
     return chatMessages.map((msg, index) => {
       const isSelected = index === selectedIndex && isFocused;
+      const separatorRows = daySeparators[index] ? 1 : 0;
       if (messageLayout === "bubble") {
-        return getBubbleMessageLineCount(msg, isGroupChat, contentWidth);
+        return separatorRows + getBubbleMessageLineCount(msg, isSelected, isGroupChat, contentWidth);
       }
-      return getMessageLineCount(msg, isSelected, contentWidth);
+      return separatorRows + getMessageLineCount(msg, isSelected, contentWidth);
     });
-  }, [chatMessages, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
+  }, [chatMessages, daySeparators, selectedIndex, isFocused, messageLayout, isGroupChat, contentWidth]);
 
   const totalLines = useMemo(() => {
     return messageLineCounts.reduce((sum, count) => sum + count, 0);
   }, [messageLineCounts]);
 
   // Calculate visible window based on LINES, not message count
-  const { startIndex, endIndex, showScrollUp, showScrollDown } = useMemo(() => {
+  const { startIndex, endIndex, showScrollUp, showScrollDown, allFit, overflows } = useMemo(() => {
     const total = chatMessages.length;
     if (total === 0) {
       return {
@@ -399,21 +452,29 @@ function MessageViewInner({
         endIndex: 0,
         showScrollUp: false,
         showScrollDown: false,
+        allFit: true,
+        overflows: false,
       };
     }
 
+    // "Load older" or "Loading older" takes the top row whenever it shows,
+    // in place of the "↑ N earlier" line
+    const olderLine = isLoadingOlder || canLoadOlder ? 1 : 0;
+
     // Check if all messages fit
-    if (totalLines <= visibleLines) {
+    if (totalLines + olderLine <= visibleLines) {
       return {
         startIndex: 0,
         endIndex: total,
         showScrollUp: false,
         showScrollDown: false,
+        allFit: true,
+        overflows: false,
       };
     }
 
     // Reserve 1 line for scroll indicators when needed
-    const reserveTop = 1;
+    const reserveTop = olderLine ? 0 : 1;
     const reserveBottom = 1;
 
     // Start with the selected message and expand to fill available lines
@@ -423,7 +484,7 @@ function MessageViewInner({
     let linesUsed = messageLineCounts[selectedIndex]!;
 
     // Calculate available lines (reserve space for potential indicators)
-    const availableLines = visibleLines;
+    const availableLines = visibleLines - olderLine;
 
     // Check if we're at the last message (no bottom indicator needed)
     const atLastMessage = selectedIndex === total - 1;
@@ -465,98 +526,226 @@ function MessageViewInner({
       }
     }
 
+    const indicatorLines = olderLine + (start > 0 ? reserveTop : 0) + (end < total ? reserveBottom : 0);
     return {
       startIndex: start,
       endIndex: end,
       showScrollUp: start > 0,
       showScrollDown: end < total,
+      allFit: false,
+      // Only when the selected message alone is taller than the panel
+      overflows: linesUsed + indicatorLines > visibleLines,
     };
-  }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines]);
+  }, [chatMessages.length, selectedIndex, messageLineCounts, totalLines, visibleLines, isLoadingOlder, canLoadOlder]);
 
   // Get visible messages
   const visibleMessages = chatMessages.slice(startIndex, endIndex);
 
-  // Render a single message in bubble layout
-  const renderBubbleMessage = (
-    msg: Message,
-    isSelected: boolean,
-    _actualIndex: number,
-  ) => {
-    const showName = isGroupChat && !msg.isOutgoing;
-    const textLines = msg.text ? msg.text.split("\n") : [""];
-    const mediaInfo = msg.media ? formatMediaMetadata(msg.media, msg.id) : "";
-    const viewHint = isSelected && msg.media ? " [Enter]" : "";
-    const timestamp = `[${formatTime(msg.timestamp)}]`;
-    const senderColor = getSenderColor(msg.senderId);
-    const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
-    const flashColor = isFlashing ? flashState?.color : undefined;
+  // A message taller than the panel is shown alone and scrolls inside its
+  // own rows, with the top row for what's above and the bottom for what's left
+  const topRow = isLoadingOlder || canLoadOlder || showScrollUp ? 1 : 0;
+  // A panel too short for the bottom row gives it to the message
+  const bottomRow = visibleLines - topRow >= 2 ? 1 : 0;
+  const tallRows = Math.max(1, visibleLines - topRow - bottomRow);
+  // The quick picker takes the message's place, so there's nothing to scroll
+  const maxScroll = overflows && !reactionPickerOpen ? Math.max(0, messageLineCounts[selectedIndex]! - tallRows) : 0;
+  const scrollOffset =
+    messageScroll && messageScroll.messageId === chatMessages[selectedIndex]?.id
+      ? Math.min(messageScroll.offset, maxScroll)
+      : 0;
+  const linesBelow = maxScroll - scrollOffset;
 
-    // Calculate padding for right-aligned messages
+  // The app keeps the selection put for new messages while a long one is being read
+  useEffect(() => {
+    onLinesBelowChange?.(linesBelow > 0);
+  }, [linesBelow, onLinesBelowChange]);
+
+  // Unsent messages have no server id to mark read up to
+  const newestShownId = reactionModalOpen ? undefined : chatMessages.slice(0, endIndex).findLast((m) => m.id > 0)?.id;
+  useEffect(() => {
+    if (chatId && newestShownId !== undefined) onSeen?.(chatId, newestShownId);
+  }, [chatId, newestShownId, onSeen]);
+
+  // Check if user is viewing the bottom of messages
+  const isAtBottom = selectedIndex >= chatMessages.length - 1 && linesBelow === 0;
+
+  // Subscribe to new messages for this chat
+  useEffect(() => {
+    const unsub = telegramService?.onNewMessage((message, incomingChatId) => {
+      if (message.isOutgoing || incomingChatId !== chatId) return;
+
+      if (isAtBottom) {
+        startMsgFlash(message.id, FLASH_CONFIG.messageFlashCount);
+      } else {
+        // Flash the "↓ X more" indicator and increment unread count
+        startIndicatorFlash("scroll-indicator", FLASH_CONFIG.indicatorFlashCount);
+        if (chatId) {
+          dispatch({ type: "INCREMENT_UNREAD", payload: { chatId } });
+        }
+      }
+    });
+    return unsub;
+  }, [telegramService, chatId, isAtBottom, startMsgFlash, startIndicatorFlash, dispatch]);
+
+  // Clear unread count when user scrolls to bottom
+  useEffect(() => {
+    if (isAtBottom && chatId) {
+      dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
+    }
+  }, [isAtBottom, chatId, dispatch]);
+
+
+  const colorForSender = (senderId: string) =>
+    senderColors?.[senderId] ?? getSenderColor(senderId);
+
+  // Reaction feedback has its own color; new and jumped-to messages use the default
+  const getFlashColor = (messageId: number) => {
+    if (flashState?.messageId === messageId) return flashState.color;
+    return isMsgFlashing(messageId) ? FLASH_CONFIG.messageColor : undefined;
+  };
+
+  // Render a single message in classic layout
+  const renderClassicMessage = (msg: Message, isSelected: boolean) => {
+    const flashColor = getFlashColor(msg.id);
+    const [first = "", ...rest] = splitLines(msg.text);
+    const firstLine = getClassicFirstLine(msg, first, isSelected);
+    return (
+      <Box flexDirection="column">
+        <Text wrap="wrap" backgroundColor={flashColor}>
+          <Text inverse={isSelected} dimColor={!isSelected}>
+            {firstLine.time}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.reply}
+          </Text>
+          <Text
+            inverse={isSelected}
+            bold
+            // No color when selected: inverse carries it
+            color={isSelected ? undefined : msg.isOutgoing ? "blue" : colorForSender(msg.senderId)}
+          >
+            {firstLine.name}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.forward}
+          </Text>
+          <Text inverse={isSelected} dimColor>
+            {firstLine.media}
+          </Text>
+          <Text inverse={isSelected}>{firstLine.text}</Text>
+          <Text inverse={isSelected} color="yellow">
+            {firstLine.viewHint}
+          </Text>
+          <Text inverse={isSelected}>{firstLine.reactions}</Text>
+          <Text
+            inverse={isSelected}
+            color={msg.delivery?.status === "failed" ? "red" : undefined}
+            dimColor={msg.delivery?.status === "pending"}
+          >
+            {firstLine.delivery}
+          </Text>
+          <Text inverse={isSelected} color="yellow">
+            {firstLine.retryHint}
+          </Text>
+        </Text>
+        {rest.map((line, lineIndex) => (
+          <Text key={lineIndex} wrap="wrap" backgroundColor={flashColor} inverse={isSelected} dimColor={!isSelected}>
+            {CONTINUATION_INDENT}
+            {line}
+          </Text>
+        ))}
+      </Box>
+    );
+  };
+
+  // Render a single message in bubble layout
+  const renderBubbleMessage = (msg: Message, isSelected: boolean) => {
+    const showName = isGroupChat && !msg.isOutgoing;
+    const { lines, suffix, fullLines } = getBubbleContent(msg, isSelected);
+    const deliveryColor = msg.delivery?.status === "failed" ? "red" : undefined;
+    const flashColor = getFlashColor(msg.id);
 
     return (
-      <Box key={msg.id} flexDirection="column">
+      <Box flexDirection="column">
         {/* Sender name (groups only, others only) - with unique color */}
         {showName && (
-          <Text color={senderColor}>{msg.senderName || "Unknown"}</Text>
+          <Text color={colorForSender(msg.senderId)} wrap="truncate">
+            {msg.senderName || "Unknown"}
+          </Text>
         )}
 
-        {/* Reply prefix */}
         {msg.replyToMsgId && (
-          <Text dimColor>↩ {msg.replyToSenderName ?? "Unknown"}</Text>
+          <Text dimColor wrap="truncate">
+            ↩ {msg.replyToSenderName ?? "Unknown"}
+          </Text>
+        )}
+
+        {msg.forwardedFrom && (
+          <Text dimColor wrap="truncate">
+            ↪ Forwarded from {msg.forwardedFrom}
+          </Text>
         )}
 
         {/* Message content with inline timestamp on last line */}
-        {textLines.map((line, lineIndex) => {
-          const isLastLine = lineIndex === textLines.length - 1;
-          const isFirstLine = lineIndex === 0;
-
-          // Build content for this line
-          let lineContent = line;
-          if (isFirstLine && mediaInfo) {
-            lineContent =
-              `${line} ${mediaInfo}${viewHint}`.trim() ||
-              `${mediaInfo}${viewHint}`;
-          }
-
-          // Add timestamp to end of last line
-          const suffix = isLastLine ? ` ${timestamp}` : "";
-          const fullContent = lineContent + suffix;
-
-          if (msg.isOutgoing) {
-            // Right-aligned, blue (user's messages)
-            const padding = Math.max(0, contentWidth - fullContent.length);
-            return (
-              <Text
-                key={lineIndex}
-                inverse={isSelected}
-                backgroundColor={flashColor}
-              >
-                {" ".repeat(padding)}
-                <Text color={isSelected ? undefined : "blue"}>{lineContent}</Text>
-                {isLastLine && <Text dimColor> {timestamp}</Text>}
-                {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
-              </Text>
-            );
-          } else {
-            // Left-aligned, normal text (not dim for better readability)
-            return (
-              <Text
-                key={lineIndex}
-                inverse={isSelected}
-                backgroundColor={flashColor}
-              >
-                <Text>{lineContent}</Text>
-                {isLastLine && <Text dimColor> {timestamp}</Text>}
-                {isLastLine && <Text>{formatReactions(msg.reactions)}</Text>}
-              </Text>
-            );
-          }
+        {lines.map((line, lineIndex) => {
+          const isLastLine = lineIndex === lines.length - 1;
+          // Right-align the user's own messages
+          const padding = msg.isOutgoing ? Math.max(0, contentWidth - stringWidth(fullLines[lineIndex]!)) : 0;
+          return (
+            <Text key={lineIndex} inverse={isSelected} backgroundColor={flashColor}>
+              {" ".repeat(padding)}
+              <Text color={msg.isOutgoing && !isSelected ? "blue" : undefined}>{line}</Text>
+              {isLastLine && (
+                <>
+                  <Text dimColor>{suffix.timestamp}</Text>
+                  <Text color={deliveryColor} dimColor={!deliveryColor}>
+                    {suffix.delivery}
+                  </Text>
+                  <Text color="yellow">{suffix.retryHint}</Text>
+                  <Text>{suffix.reactions}</Text>
+                </>
+              )}
+            </Text>
+          );
         })}
       </Box>
     );
   };
 
+  // A message with its day label, or the quick picker in its place
+  const renderEntry = (msg: Message, index: number) => {
+    const isSelected = index === selectedIndex && isFocused;
+    const daySeparator = daySeparators[index];
+    return (
+      <Box key={msg.id} flexDirection="column" flexShrink={0}>
+        {daySeparator && (
+          <Box justifyContent="center">
+            <Text dimColor wrap="truncate">
+              ── {daySeparator} ──
+            </Text>
+          </Box>
+        )}
+        {reactionPickerOpen && msg.id === reactionOverlay?.messageId ? (
+          <ReactionPicker
+            emojis={QUICK_EMOJIS}
+            selectedIndex={reactionPickerIndex}
+            onSelect={handleSendReaction}
+            onOpenModal={() => setReactionOverlay({ kind: "modal", messageId: msg.id })}
+            onCancel={() => setReactionOverlay(null)}
+            width={contentWidth}
+          />
+        ) : messageLayout === "bubble" ? (
+          renderBubbleMessage(msg, isSelected)
+        ) : (
+          renderClassicMessage(msg, isSelected)
+        )}
+      </Box>
+    );
+  };
+
   if (!selectedChatTitle) {
+    // Room for the logo plus the border, gap and hint, with breathing space around it.
+    const fitsLogo = (height === undefined || height >= LOGO_ROWS + 6) && width >= LOGO_COLS + 6;
     return (
       <Box
         flexDirection="column"
@@ -566,7 +755,12 @@ function MessageViewInner({
         justifyContent="center"
         alignItems="center"
       >
-        <Text dimColor>Select a chat to start</Text>
+        {/* One wrapper so the group is centered as a unit: when centering lands on a
+            half row, Ink rounds sibling boxes differently and overlaps them by a row. */}
+        <Box flexDirection="column" alignItems="center" gap={1}>
+          {fitsLogo && <Logo />}
+          <Text dimColor>Select a chat to start</Text>
+        </Box>
       </Box>
     );
   }
@@ -586,148 +780,116 @@ function MessageViewInner({
         borderRight={false}
         borderTop={false}
       >
-        <Text bold color={isFocused ? "cyan" : undefined}>
+        <Text bold color={isFocused ? "cyan" : undefined} wrap="truncate">
           {selectedChatTitle}
         </Text>
-        {isTyping && <Text dimColor italic> typing…</Text>}
-        {totalLines > visibleLines && (
-          <Text dimColor>
-            {" "}
-            ({selectedIndex + 1}/{chatMessages.length})
-          </Text>
+        {isTyping && (
+          <Box flexShrink={0}>
+            <Text dimColor italic>
+              {" "}typing…
+            </Text>
+          </Box>
+        )}
+        {!allFit && (
+          <Box flexShrink={0}>
+            <Text dimColor>
+              {" "}
+              ({selectedIndex + 1}/{chatMessages.length})
+            </Text>
+          </Box>
         )}
       </Box>
+      {reactionModalOpen ? (
+        // Takes the place of the messages, so nothing shows through it
+        <Box height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
+          <ReactionModal
+            onSelect={handleSendReaction}
+            onCancel={() => setReactionOverlay(null)}
+            width={width - (skin.panelDividers ? 0 : 2)}
+            height={visibleLines}
+          />
+        </Box>
+      ) : chatMessages.length === 0 ? (
+        <Box flexDirection="column" height={visibleLines} justifyContent="center" alignItems="center" overflow="hidden">
+          {/* The hint line drops first when there's only one row */}
+          {loadStatus === "loading" && (
+            <Text dimColor wrap="truncate">
+              Loading messages…
+            </Text>
+          )}
+          {loadStatus === "error" && (
+            <>
+              <Text color="red" wrap="truncate">
+                Couldn't load messages
+              </Text>
+              {visibleLines > 1 && (
+                <Text dimColor wrap="truncate">
+                  Press Ctrl+R to retry
+                </Text>
+              )}
+            </>
+          )}
+          {loadStatus === "ready" && (
+            <>
+              <Text dimColor wrap="truncate">
+                No messages yet
+              </Text>
+              {visibleLines > 1 && (
+                <Text dimColor wrap="truncate">
+                  Say hi below
+                </Text>
+              )}
+            </>
+          )}
+        </Box>
+      ) : (
       <Box
         flexDirection="column"
+        // Conversations sit on the input, like every chat app. A message taller
+        // than the panel anchors to the top so its start stays readable.
+        justifyContent={overflows ? "flex-start" : "flex-end"}
         paddingX={1}
         height={visibleLines}
         overflowY="hidden"
       >
-        {isLoadingOlder && <Text dimColor> Loading older messages...</Text>}
+        {isLoadingOlder && (
+          <Text dimColor wrap="truncate">
+            {" "}Loading older messages...
+          </Text>
+        )}
         {canLoadOlder && !isLoadingOlder && (
-          <Text color="yellow"> ↑ Press Enter to load older messages</Text>
+          <Text color="yellow" wrap="truncate">
+            {" "}↑ Press Enter to load older messages
+          </Text>
         )}
         {showScrollUp && !isLoadingOlder && !canLoadOlder && (
-          <Text dimColor> ↑ {startIndex} earlier</Text>
+          <Text dimColor wrap="truncate">
+            {" "}↑ {startIndex} earlier
+          </Text>
         )}
-        {messageLayout === "bubble"
-          ? // Bubble layout rendering
-            visibleMessages.map((msg, i) => {
-              const actualIndex = startIndex + i;
-              const isSelected = actualIndex === selectedIndex && isFocused;
-              if (reactionPickerOpen && actualIndex === selectedIndex) {
-                return (
-                  <ReactionPicker
-                    key={msg.id}
-                    emojis={QUICK_EMOJIS}
-                    selectedIndex={reactionPickerIndex}
-                    onSelect={handleSendReaction}
-                    onOpenModal={() => {
-                      setReactionPickerOpen(false);
-                      setReactionModalOpen(true);
-                    }}
-                    onCancel={() => setReactionPickerOpen(false)}
-                  />
-                );
-              }
-              return renderBubbleMessage(msg, isSelected, actualIndex);
-            })
-          : // Classic layout rendering (existing code)
-            visibleMessages.map((msg, i) => {
-              const actualIndex = startIndex + i;
-              const isSelected = actualIndex === selectedIndex && isFocused;
-              const isFlashing = flashState?.messageId === msg.id || isMsgFlashing(msg.id);
-              const flashColor = isFlashing ? flashState?.color : undefined;
-
-              if (reactionPickerOpen && actualIndex === selectedIndex) {
-                return (
-                  <ReactionPicker
-                    key={msg.id}
-                    emojis={QUICK_EMOJIS}
-                    selectedIndex={reactionPickerIndex}
-                    onSelect={handleSendReaction}
-                    onOpenModal={() => {
-                      setReactionPickerOpen(false);
-                      setReactionModalOpen(true);
-                    }}
-                    onCancel={() => setReactionPickerOpen(false)}
-                  />
-                );
-              }
-
-              const senderName = msg.isOutgoing ? "You" : msg.senderName;
-              const nbspSenderName = senderName.replace(/ /g, "\u00A0");
-              const lines = msg.text.split("\n");
-              const mediaInfo = msg.media
-                ? ` ${formatMediaMetadata(msg.media, msg.id)}`
-                : "";
-              const viewHint =
-                isSelected && msg.media ? " [Press enter to view]" : "";
-              return (
-                <Box key={msg.id} flexDirection="column" flexShrink={0}>
-                  {lines.map((line, lineIndex) => (
-                    <Box key={lineIndex}>
-                      <Text wrap="wrap" backgroundColor={flashColor}>
-                        {lineIndex === 0 ? (
-                          <>
-                            <Text inverse={isSelected} dimColor={!isSelected}>
-                              [{formatTime(msg.timestamp)}]{"\u00A0"}
-                            </Text>
-                            {/* Reply prefix */}
-                            {msg.replyToMsgId && (
-                              <Text inverse={isSelected} dimColor>
-                                ↩{msg.replyToSenderName ?? "Unknown"}:{"\u00A0"}
-                              </Text>
-                            )}
-                            <Text
-                              inverse={isSelected}
-                              bold
-                              color={
-                                isSelected
-                                  ? undefined // No color when selected (use inverse colors)
-                                  : msg.isOutgoing
-                                    ? "blue"
-                                    : getSenderColor(msg.senderId)
-                              }
-                            >
-                              {nbspSenderName}:
-                            </Text>
-                            <Text inverse={isSelected} dimColor>
-                              {mediaInfo}
-                            </Text>
-                            <Text inverse={isSelected}> {line}</Text>
-                            <Text inverse={isSelected} color="yellow">
-                              {viewHint}
-                            </Text>
-                            <Text inverse={isSelected}>
-                              {formatReactions(msg.reactions)}
-                            </Text>
-                          </>
-                        ) : (
-                          <Text inverse={isSelected} dimColor={!isSelected}>
-                            {"        "}
-                            {line}
-                          </Text>
-                        )}
-                      </Text>
-                    </Box>
-                  ))}
-                </Box>
-              );
-            })}
-        {showScrollDown && (
-          <Text dimColor inverse={isIndicatorFlashing("scroll-indicator")}>
+        {overflows ? (
+          <Box height={tallRows} flexShrink={0} flexDirection="column" overflow="hidden">
+            <Box marginTop={-scrollOffset} flexDirection="column" flexShrink={0}>
+              {renderEntry(chatMessages[selectedIndex]!, selectedIndex)}
+            </Box>
+          </Box>
+        ) : (
+          visibleMessages.map((msg, i) => renderEntry(msg, startIndex + i))
+        )}
+        {linesBelow > 0 && bottomRow ? (
+          <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
+            {" "}↓ {linesBelow} more {linesBelow === 1 ? "line" : "lines"}
+          </Text>
+        ) : overflows && bottomRow && !showScrollDown ? (
+          // Keeps the bottom row the message was laid out around
+          <Text> </Text>
+        ) : null}
+        {showScrollDown && linesBelow === 0 && (!overflows || bottomRow) && (
+          <Text dimColor wrap="truncate" inverse={isIndicatorFlashing("scroll-indicator")}>
             {" "}↓ {chatMessages.length - endIndex} more
           </Text>
         )}
       </Box>
-      {reactionModalOpen && (
-        <Box position="absolute" marginTop={5} marginLeft={10}>
-          <ReactionModal
-            onSelect={handleSendReaction}
-            onCancel={() => setReactionModalOpen(false)}
-          />
-        </Box>
       )}
     </Box>
   );

@@ -34,17 +34,22 @@ describe("grayscaleTextProps", () => {
     expect(grayscaleTextProps(props, false)).toBe(props);
   });
 
-  it("maps color to gray, drops backgroundColor, keeps formatting when grayscale", () => {
+  it("maps color and background to gray, keeps formatting when grayscale", () => {
     const result = grayscaleTextProps(
       { color: "cyan", backgroundColor: "blue", inverse: true, bold: true, dimColor: true, children: "x" },
       true,
     );
     expect(result.color).toBe("ansi256(255)");
-    expect("backgroundColor" in result).toBe(false);
+    // Still flashes: a reaction or new message gets a gray background
+    expect(result.backgroundColor).toBe("ansi256(242)");
     expect(result.inverse).toBe(true);
     expect(result.bold).toBe(true);
     expect(result.dimColor).toBe(true);
     expect(result.children).toBe("x");
+  });
+
+  it("adds no background where there was none", () => {
+    expect("backgroundColor" in grayscaleTextProps({ color: "cyan", children: "x" }, true)).toBe(false);
   });
 });
 

@@ -8,8 +8,7 @@ interface HeaderBarProps {
 
 function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
   const skin = useSkin();
-  // TODO: finish bubble layout
-  const _settingsStyle = {
+  const settingsStyle = {
     bold: isFocused && selectedButton === "settings",
     color: isFocused && selectedButton === "settings" ? "cyan" : undefined,
     dimColor: !isFocused || selectedButton !== "settings",
@@ -35,15 +34,16 @@ function HeaderBarInner({ isFocused, selectedButton }: HeaderBarProps) {
         : { borderStyle: "round" as const, borderColor: isFocused ? "cyan" : "blue" })}
       paddingX={1}
       justifyContent="space-between"
+      // Keeps its rows when what's below is too tall
+      flexShrink={0}
     >
-      <Text bold color="cyan">
+      {/* One row always: on narrow screens the title gives way to the buttons */}
+      <Text bold color="cyan" wrap="truncate">
         telegram-console
       </Text>
-      <Box>
-        {/* TODO: finish bubble layout
+      <Box flexShrink={0} marginLeft={1}>
         <Text {...settingsStyle}>[Settings]</Text>
         <Text> </Text>
-        */}
         <Text {...logoutStyle}>[Logout]</Text>
       </Box>
     </Box>
