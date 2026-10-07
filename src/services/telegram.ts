@@ -238,6 +238,7 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
           title: d.title ?? "Unknown",
           unreadCount: d.unreadCount ?? 0,
           isGroup: d.isGroup ?? false,
+          isChannel: d.isChannel,
           isMuted: isMuted(d.dialog),
           // getDialogs attaches each message's sender, so this needs no extra request
           // MessageEmpty has no date (or anything else worth previewing)

@@ -88,6 +88,11 @@ export interface Chat {
   unreadCount: number;
   lastMessage?: Message;
   isGroup: boolean;
+  /**
+   * A supergroup or channel: numbers its messages on its own. Private chats
+   * and small groups share one sequence, so a delete there doesn't say which chat.
+   */
+  isChannel?: boolean;
   /** Muted in Telegram: no bell or notification, and left out of the title's count */
   isMuted?: boolean;
 }

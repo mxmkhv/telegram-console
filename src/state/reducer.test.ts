@@ -691,14 +691,17 @@ describe("changes made elsewhere", () => {
   });
 
   it("applies a delete without a chat to private chats and small groups, not channels", () => {
-    const state = appReducer(withMessages({ "42": [msg(7)], "-1001234": [msg(7)], "-1001234567890": [msg(7)] }), {
-      type: "MESSAGES_DELETED",
-      payload: { chatId: undefined, messageIds: [7] },
+    // GramJS doesn't pad channel ids: -100 then 9 digits is still a supergroup
+    let state = withMessages({ "42": [msg(7)], "-1001234": [msg(7)], "-100123456789": [msg(7)] });
+    state = appReducer(state, {
+      type: "SET_CHATS",
+      payload: state.chats.map((c) => (c.id === "-100123456789" ? { ...c, isChannel: true } : c)),
     });
+    state = appReducer(state, { type: "MESSAGES_DELETED", payload: { chatId: undefined, messageIds: [7] } });
     expect(state.messages["42"]).toEqual([]);
-    // A small group whose id happens to start with -100
     expect(state.messages["-1001234"]).toEqual([]);
-    expect(state.messages["-1001234567890"]!.map((m) => m.id)).toEqual([7]);
+    expect(state.messages["-100123456789"]!.map((m) => m.id)).toEqual([7]);
+    expect(state.chats.find((c) => c.id === "-100123456789")!.lastMessage?.id).toBe(7);
   });
 
   it("closes what was open on a deleted message, and says why", () => {

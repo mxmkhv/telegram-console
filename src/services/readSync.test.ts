@@ -36,13 +36,31 @@ describe("createReadSync", () => {
     expect(calls).toEqual([["a", 7]]);
   });
 
-  it("sends the last chat's position right away on moving to another", async () => {
+  it("sends each chat's position", async () => {
     const { sync, calls } = setup();
     sync.seen("a", 7);
     sync.seen("b", 2);
-    expect(calls).toEqual([["a", 7]]);
+    sync.seen("a", 8);
     await wait(40);
-    expect(calls).toEqual([["a", 7], ["b", 2]]);
+    expect(calls).toEqual([["a", 8], ["b", 2]]);
+  });
+
+  it("keeps a chat's failed position while you read another", async () => {
+    const calls: Array<[string, number]> = [];
+    let failA = true;
+    const sync = createReadSync(async (chatId, messageId) => {
+      calls.push([chatId, messageId]);
+      if (chatId === "a" && failA) throw new Error("offline");
+      return true;
+    }, 20, 50);
+    sync.seen("a", 7);
+    await wait(10);
+    sync.seen("b", 2);
+    await wait(15);
+    // a failed while b was waiting
+    failA = false;
+    await wait(80);
+    expect(calls).toEqual([["a", 7], ["b", 2], ["a", 7]]);
   });
 
   it("tries again after a failure, waiting longer each time", async () => {
@@ -83,10 +101,11 @@ describe("createReadSync", () => {
   it("sends what's waiting on close, and nothing after", async () => {
     const { sync, calls } = setup([new Error("offline")]);
     sync.seen("a", 4);
+    sync.seen("b", 3);
     sync.close();
-    expect(calls).toEqual([["a", 4]]);
+    expect(calls).toEqual([["a", 4], ["b", 3]]);
     sync.seen("a", 5);
     await wait(120);
-    expect(calls).toEqual([["a", 4]]);
+    expect(calls).toEqual([["a", 4], ["b", 3]]);
   });
 });

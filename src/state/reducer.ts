@@ -142,14 +142,6 @@ export function isOverlayOpen(state: AppState): boolean {
   );
 }
 
-// Channels and supergroups number their messages on their own. Private chats
-// and small groups share one sequence, so an id alone says which chat it's in.
-// GramJS marks channel ids as -100 followed by at least 10 digits; a small
-// group's can start with -100 too, but is shorter.
-function sharesMessageIds(chatId: string): boolean {
-  return !/^-100\d{10,}$/.test(chatId);
-}
-
 // Reported counts, keeping which are yours where the report leaves that out
 function mergeReactions(
   current: Message["reactions"],
@@ -619,7 +611,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "MESSAGES_DELETED": {
       const { chatId, messageIds } = action.payload;
       const deleted = new Set(messageIds);
-      const inChat = (id: string) => (chatId === undefined ? sharesMessageIds(id) : id === chatId);
+      // Without a chat, it's any private chat or small group: their ids don't repeat
+      const sharingIds = new Set(state.chats.filter((chat) => !chat.isChannel).map((chat) => chat.id));
+      const inChat = (id: string) => (chatId === undefined ? sharingIds.has(id) : id === chatId);
       let messages = state.messages;
       for (const [id, list] of Object.entries(state.messages)) {
         if (!inChat(id) || !list.some((m) => deleted.has(m.id))) continue;
