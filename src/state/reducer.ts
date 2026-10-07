@@ -1,4 +1,4 @@
-import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode } from "../types";
+import type { Chat, ChatDraft, Delivery, Message, Notice, ConnectionState, FocusedPanel, CurrentView, MessageLayout, UiMode, SkinName, NotificationMode, ReportedReaction } from "../types";
 import { assignSenderColors, type SenderColors } from "../utils/senderColor";
 
 interface MediaPanelState {
@@ -82,6 +82,11 @@ export type AppAction =
   // `text` is the text the result belongs to; results for an older edit are ignored
   | { type: "SET_DELIVERY"; payload: { chatId: string; messageId: number; text: string; delivery: Delivery | undefined } }
   | { type: "DISCARD_UNSENT"; payload: { chatId: string; messageId: number } }
+  // Changes made elsewhere: by others, or by you on another device
+  | { type: "MESSAGE_EDITED"; payload: { chatId: string; message: Message } }
+  // Without a chatId: any private chat or small group (see TelegramService.onMessagesDeleted)
+  | { type: "MESSAGES_DELETED"; payload: { chatId: string | undefined; messageIds: number[] } }
+  | { type: "SET_REACTIONS"; payload: { chatId: string; messageId: number; reactions: ReportedReaction[] } }
   | { type: "SET_REACTION_OVERLAY"; payload: ReactionOverlay }
   | { type: "SET_SHOW_CHAT_SWITCHER"; payload: boolean }
   | { type: "SET_SHOW_HELP"; payload: boolean }
@@ -135,6 +140,13 @@ export function isOverlayOpen(state: AppState): boolean {
     state.showHelp ||
     state.mediaPanel.isOpen
   );
+}
+
+// Channels and supergroups number their messages on their own. Private chats
+// and small groups share one sequence, so an id alone says which chat it's in.
+// GramJS marks channel ids with a -100 prefix.
+function sharesMessageIds(chatId: string): boolean {
+  return !chatId.startsWith("-100");
 }
 
 function withSenderColors(
@@ -572,6 +584,69 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         chats: withLastMessage(state.chats, chatId, (last) => (last.id === messageId ? remaining.at(-1) : last)),
         messages: { ...state.messages, [chatId]: remaining },
       };
+    }
+
+    case "MESSAGE_EDITED": {
+      const { chatId, message } = action.payload;
+      return mapMessage(state, chatId, message.id, (msg) =>
+        // Your own edit from here is still in flight: its result decides
+        msg.delivery
+          ? msg
+          : {
+              ...msg,
+              text: message.text,
+              media: message.media,
+              reactions: message.reactions,
+              replyToMsgId: message.replyToMsgId,
+              forwardedFrom: message.forwardedFrom,
+            },
+      );
+    }
+
+    case "MESSAGES_DELETED": {
+      const { chatId, messageIds } = action.payload;
+      const deleted = new Set(messageIds);
+      const inChat = (id: string) => (chatId === undefined ? sharesMessageIds(id) : id === chatId);
+      let messages = state.messages;
+      for (const [id, list] of Object.entries(state.messages)) {
+        if (!inChat(id) || !list.some((m) => deleted.has(m.id))) continue;
+        messages = { ...messages, [id]: list.filter((m) => !deleted.has(m.id)) };
+      }
+      const chats = state.chats.map((chat) =>
+        inChat(chat.id) && chat.lastMessage && deleted.has(chat.lastMessage.id)
+          ? // What came before it, if it's loaded
+            { ...chat, lastMessage: messages[chat.id]?.at(-1) }
+          : chat,
+      );
+      // Nothing left to react to, view or reply to
+      const goneHere = (id: number | null | undefined) =>
+        id != null && deleted.has(id) && !!state.selectedChatId && inChat(state.selectedChatId);
+      const mediaGone = state.mediaPanel.isOpen && goneHere(state.mediaPanel.messageId);
+      const replyGone = goneHere(state.replyingToMessage?.id);
+      const next: AppState = {
+        ...state,
+        messages,
+        chats,
+        reactionOverlay: goneHere(state.reactionOverlay?.messageId) ? null : state.reactionOverlay,
+        mediaPanel: mediaGone ? initialState.mediaPanel : state.mediaPanel,
+        focusedPanel: mediaGone ? "messages" : state.focusedPanel,
+        replyingToMessage: replyGone ? null : state.replyingToMessage,
+      };
+      // Say why it closed, unless that would hide an error still waiting on you
+      if ((!mediaGone && !replyGone) || state.notice?.sticky) return next;
+      const text = mediaGone ? "That message was deleted" : "The message you were replying to was deleted";
+      return appReducer(next, { type: "SHOW_NOTICE", payload: { kind: "info", text } });
+    }
+
+    case "SET_REACTIONS": {
+      const { chatId, messageId, reactions } = action.payload;
+      return mapMessage(state, chatId, messageId, (msg) => ({
+        ...msg,
+        reactions: reactions.map((r) => ({
+          ...r,
+          hasUserReacted: r.hasUserReacted ?? msg.reactions?.find((mine) => mine.emoji === r.emoji)?.hasUserReacted ?? false,
+        })),
+      }));
     }
 
     case "SET_REACTION_OVERLAY":

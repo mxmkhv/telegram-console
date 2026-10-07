@@ -29,10 +29,25 @@ export type FocusedPanel = "header" | "chatList" | "messages" | "input" | "media
 export type CurrentView = "chat" | "settings";
 export type LogoutMode = "session" | "full";
 
-type MediaType = "photo" | "sticker" | "gif" | "video" | "document" | "voice";
+type MediaType =
+  | "photo"
+  | "sticker"
+  | "gif"
+  | "video"
+  | "videoNote"
+  | "voice"
+  | "audio"
+  | "document"
+  | "poll"
+  | "location"
+  | "contact"
+  // Dice, games, invoices, stories and kinds this client can't show
+  | "other";
 
 export interface MediaAttachment {
   type: MediaType;
+  /** Poll question, place, contact or song; for "other", what it is */
+  title?: string;
   fileSize?: number;
   width?: number;
   height?: number;
@@ -57,6 +72,14 @@ interface MessageReaction {
   hasUserReacted: boolean;
 }
 
+/** Reactions as an update reports them */
+export interface ReportedReaction {
+  emoji: string;
+  count: number;
+  /** Undefined when Telegram left it out (`min` updates): the copy you have knows better */
+  hasUserReacted: boolean | undefined;
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -78,6 +101,7 @@ export interface Message {
   reactions?: MessageReaction[];
   replyToMsgId?: number;        // ID of message this replies to
   replyToSenderName?: string;   // Sender name for display
+  forwardedFrom?: string;       // Who wrote it, when it's a forward
   delivery?: Delivery;          // Set while a send/edit from this client is unconfirmed
 }
 
@@ -116,6 +140,15 @@ export interface TelegramService {
   removeReaction(chatId: string, messageId: number): Promise<boolean>;
   onConnectionStateChange(callback: (state: ConnectionState) => void): () => void;
   onNewMessage(callback: (message: Message, chatId: string) => void): () => void;
+  /** An edit, by anyone. In private chats and small groups, reaction changes arrive this way too. */
+  onMessageEdited(callback: (message: Message, chatId: string) => void): () => void;
+  /**
+   * Deleted messages. Without a chat id they're from private chats or small
+   * groups, where message ids are unique across all of them.
+   */
+  onMessagesDeleted(callback: (messageIds: number[], chatId: string | undefined) => void): () => void;
+  /** Reaction counts changed (groups and channels) */
+  onReactionsChanged(callback: (chatId: string, messageId: number, reactions: ReportedReaction[]) => void): () => void;
   onTyping(callback: (chatId: string, isTyping: boolean) => void): () => void;
   downloadMedia(message: Message): Promise<Buffer | undefined>;
 }

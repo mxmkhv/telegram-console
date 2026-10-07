@@ -22,6 +22,7 @@ import { ChatSwitcher } from "./components/ChatSwitcher";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { MediaPanel } from "./components/MediaPanel";
 import { BlankScreen } from "./components/BlankScreen";
+import { createReadSync } from "./services/readSync";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NoticeLine } from "./components/NoticeLine";
 import { describeError } from "./utils/describeError";
@@ -62,6 +63,18 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
     hidden: state.isHidden,
     mode: state.notifications,
   });
+  // Up to the newest message shown in the open chat, while you can see it
+  const readSync = useMemo(
+    () => createReadSync((chatId, messageId) => telegramService.markAsRead(chatId, messageId)),
+    [telegramService],
+  );
+  useEffect(() => () => readSync.stop(), [readSync]);
+  const [readPosition, setReadPosition] = useState<{ chatId: string; messageId: number } | null>(null);
+  const handleSeen = useCallback((chatId: string, messageId: number) => setReadPosition({ chatId, messageId }), []);
+  useEffect(() => {
+    if (readPosition && !messagesCovered && !state.isHidden) readSync.seen(readPosition.chatId, readPosition.messageId);
+  }, [readPosition, messagesCovered, state.isHidden, readSync]);
+
   const { exit } = useInkApp();
   // Track highlighted chat by ID (not index) so it follows when chats reorder
   const [highlightedChatId, setHighlightedChatId] = useState<string | null>(null);
@@ -188,10 +201,23 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
       dispatch({ type: "SET_TYPING", payload: { chatId, isTyping } });
     });
 
+    const unsubEdits = telegramService.onMessageEdited((message, chatId) => {
+      dispatch({ type: "MESSAGE_EDITED", payload: { chatId, message } });
+    });
+    const unsubDeletes = telegramService.onMessagesDeleted((messageIds, chatId) => {
+      dispatch({ type: "MESSAGES_DELETED", payload: { chatId, messageIds } });
+    });
+    const unsubReactions = telegramService.onReactionsChanged((chatId, messageId, reactions) => {
+      dispatch({ type: "SET_REACTIONS", payload: { chatId, messageId, reactions } });
+    });
+
     return () => {
       unsubConnection();
       unsubMessages();
       unsubTyping();
+      unsubEdits();
+      unsubDeletes();
+      unsubReactions();
     };
   }, [telegramService, dispatch]);
 
@@ -216,20 +242,11 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
         return;
       }
       if (cancelled) return;
+      // Read sync marks them read once they're on screen
       dispatch({
         type: "SET_MESSAGES",
         payload: { chatId, messages },
       });
-
-      // Mark as read in parallel (fire-and-forget, doesn't block UI)
-      if (messages.length > 0) {
-        const lastMessageId = messages.at(-1)!.id;
-        telegramService.markAsRead(chatId, lastMessageId).then((success) => {
-          if (success) {
-            dispatch({ type: "UPDATE_UNREAD_COUNT", payload: { chatId, count: 0 } });
-          }
-        });
-      }
     };
 
     void loadMessages();
@@ -692,11 +709,31 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
   // Track message counts per-chat to handle switching between chats correctly
   const prevChatIdRef = React.useRef<string | null>(null);
   const messageCounts = React.useRef<Record<string, number>>({});
+  const lastSeen = React.useRef<{ chatId: string | null; messages: Message[] }>({ chatId: null, messages: [] });
   useEffect(() => {
     const chatId = state.selectedChatId;
     const chatChanged = chatId !== prevChatIdRef.current;
     const prevCount = chatId ? messageCounts.current[chatId] ?? 0 : 0;
     const currentCount = currentMessages.length;
+    const previous = lastSeen.current;
+    lastSeen.current = { chatId, messages: currentMessages };
+    if (chatId) {
+      messageCounts.current[chatId] = currentCount;
+    }
+
+    // Messages deleted: stay on the same message, or the next one if it went
+    const kept = new Set(currentMessages.map((m) => m.id));
+    const previousIds = new Set(previous.messages.map((m) => m.id));
+    if (
+      !chatChanged &&
+      previous.chatId === chatId &&
+      currentCount < previous.messages.length &&
+      currentMessages.every((m) => previousIds.has(m.id))
+    ) {
+      const removedAbove = previous.messages.slice(0, messageIndex).filter((m) => !kept.has(m.id)).length;
+      setMessageIndex(Math.max(0, Math.min(currentCount - 1, messageIndex - removedAbove)));
+      return;
+    }
     const isLoadingOlder = chatId ? state.loadingOlderMessages[chatId] ?? false : false;
 
     // Scroll to bottom on: chat switch, messages loaded/replaced, or new message added
@@ -721,12 +758,8 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
       // Clamp index if out of bounds
       setMessageIndex(currentCount - 1);
     }
-
-    if (chatId) {
-      messageCounts.current[chatId] = currentCount;
-    }
     // Re-running when readingLongMessage changes is a no-op: the counts already match
-  }, [state.selectedChatId, currentMessages.length, messageIndex, state.loadingOlderMessages, state.reactionOverlay, readingLongMessage]);
+  }, [state.selectedChatId, currentMessages, messageIndex, state.loadingOlderMessages, state.reactionOverlay, readingLongMessage]);
 
   // Check if we can load older messages (near top of messages)
   const canLoadOlder = useMemo(() => {
@@ -888,6 +921,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
                 removeReaction={removeReaction}
                 onRetryDelivery={handleRetryDelivery}
                 onLoadOlder={loadOlderMessages}
+                onSeen={handleSeen}
                 reactionOverlay={state.reactionOverlay}
                 isTyping={!!(state.selectedChatId && state.typingChats[state.selectedChatId])}
                 onLinesBelowChange={setReadingLongMessage}

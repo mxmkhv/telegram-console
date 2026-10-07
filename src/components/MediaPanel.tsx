@@ -15,7 +15,7 @@ const MIN_IMAGE_HEIGHT = 4;
 // Space cycles through these magnification levels, wrapping 3 → 1 (fit).
 const ZOOM_LEVELS = [1, 1.5, 2, 2.5, 3] as const;
 const PAN_STEP = 2;
-const ZOOMABLE_TYPES = new Set(['photo', 'sticker', 'gif', 'video']);
+const ZOOMABLE_TYPES = new Set(['photo', 'sticker', 'gif', 'video', 'videoNote', 'document']);
 
 // The image is rendered once per zoom change; panning windows over this data.
 type RenderData =
@@ -145,7 +145,7 @@ export function MediaPanel({ message, panelWidth, panelHeight, downloadMedia, on
     return sliceAnsiViewport(render.image, panX, panY, render.viewCols, render.viewRows);
   }, [render, panX, panY, zoom]);
 
-  const metadata = formatMediaMetadata(media, messageId);
+  const metadata = formatMediaMetadata(media);
 
   const focusColor = isFocused ? 'cyan' : 'blue';
 
