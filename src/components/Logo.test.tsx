@@ -67,6 +67,8 @@ describe("Logo", () => {
 
     expect(stdout.frames.find((f) => f.includes(TRANSMIT))).toContain(`c=${LOGO_COLS},r=${LOGO_ROWS}`);
     expect(lastFrame()).toContain(LOGO_ID_COLOR);
+    // Ink must preserve the explicit zero image-ID byte required by iTerm.
+    expect(lastFrame()).toContain(`${PLACEHOLDER}\u0305\u0305\u0305`);
     expect(Array.from(lastFrame()!).filter((c) => c === PLACEHOLDER)).toHaveLength(LOGO_COLS * LOGO_ROWS);
 
     unmount();
@@ -114,9 +116,9 @@ describe("Logo", () => {
     expect(count(stdout.frames, TRANSMIT)).toBe(0);
   });
 
-  // Each placeholder is one code point plus two combining diacritics. Ink must
+  // Each placeholder is one code point plus three combining diacritics. Ink must
   // keep them in one cell (needs @alcalzone/ansi-tokenize >= 0.2.5), or each
-  // row spills 2 extra cells per placeholder and erases the border beside it.
+  // row spills extra cells per placeholder and erases the border beside it.
   it("keeps the surrounding border intact on image rows", async () => {
     kittyOverride = true;
     const width = LOGO_COLS + 4;

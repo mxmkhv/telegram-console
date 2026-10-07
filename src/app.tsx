@@ -839,7 +839,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
 
   return (
     <SkinContext.Provider value={state.skin}>
-      <Box flexDirection="column" height="100%">
+      {/* A fixed height: Ink's root has none, so "100%" would follow the content, and a frame
+          that reaches the terminal's height is redrawn by clearing the screen */}
+      <Box flexDirection="column" height={terminalRows}>
         {!isMinimal && (
           <HeaderBar
             isFocused={isHeaderFocused}

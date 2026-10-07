@@ -116,7 +116,8 @@ export function transmitAndPlace(png: Buffer, cols: number, rows: number, imageI
 // diacritic, so the terminal paints exactly that sub-region of the image — this
 // is what makes panning work without re-transmitting the image. The offset is
 // clamped so the window stays within the placement. Image id is carried in the
-// foreground color (256-indexed for id <= 255).
+// foreground color (256-indexed for id <= 255), with its high byte in a third
+// diacritic. Encode even a zero high byte: iTerm treats an omitted byte as 0xff.
 export function placeholderGridWindow(
   totalCols: number,
   totalRows: number,
@@ -130,6 +131,7 @@ export function placeholderGridWindow(
     ? `${ESC}[38;5;${imageId}m`
     : `${ESC}[38;2;${(imageId >> 16) & 0xff};${(imageId >> 8) & 0xff};${imageId & 0xff}m`;
   const reset = `${ESC}[39m`;
+  const imageMSB = String.fromCodePoint(DIACRITICS[(imageId >>> 24) & 0xff]!);
   const cols = Math.max(0, Math.min(winW, totalCols));
   const rows = Math.max(0, Math.min(winH, totalRows));
   const clampedOffX = Math.max(0, Math.min(offX, totalCols - cols));
@@ -139,7 +141,7 @@ export function placeholderGridWindow(
     const rowDia = String.fromCodePoint(DIACRITICS[clampedOffY + row]!);
     let line = setColor;
     for (let col = 0; col < cols; col++) {
-      line += PLACEHOLDER + rowDia + String.fromCodePoint(DIACRITICS[clampedOffX + col]!);
+      line += PLACEHOLDER + rowDia + String.fromCodePoint(DIACRITICS[clampedOffX + col]!) + imageMSB;
     }
     lines.push(line + reset);
   }

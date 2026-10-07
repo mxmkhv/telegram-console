@@ -494,6 +494,12 @@ describe("MainApp help overlay", () => {
 
     await press(stdin, "s");
     expect(lastFrame()).toContain("Switch tab");
+    // Shorter than the 24-row test terminal: a frame that fills it is redrawn by clearing the screen
+    for (const tab of ["Layout", "Skin", "Notifications", "Typing"]) {
+      expect(lastFrame()).toContain(`[ ${tab} ]`);
+      expect(lastFrame()!.split("\n").length).toBeLessThanOrEqual(23);
+      await press(stdin, "\x1b[C");
+    }
   });
 });
 
@@ -764,8 +770,8 @@ describe("MainApp navigation keys", () => {
   it("a new message is followed when the last one exactly filled the panel", async () => {
     const { lastFrame, stdin } = renderApp();
     await wait(250);
-    // Day label + 8 lines + "↑ 8 earlier" fill the 10 message rows exactly
-    const text = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n");
+    // Day label + 7 lines + "↑ 8 earlier" fill the 9 message rows exactly
+    const text = Array.from({ length: 7 }, (_, i) => `line ${i + 1}`).join("\n");
     await press(stdin, "\r", text, "\r", "\x1b");
     expect(lastFrame()).toContain("(9/9)");
     expect(lastFrame()).not.toContain("more line");
