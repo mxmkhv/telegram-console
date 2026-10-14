@@ -19,11 +19,16 @@ export function formatSenderName(sender: GramJSSender | undefined): string {
   return sender.title ?? sender.username ?? "Unknown";
 }
 
-function documentAttribute<T extends Api.TypeDocumentAttribute>(
+export function documentAttribute<T extends Api.TypeDocumentAttribute>(
   doc: Api.Document,
   type: new (...args: never[]) => T,
 ): T | undefined {
   return doc.attributes.find((a): a is T => a instanceof type);
+}
+
+/** TGS (Lottie) or video, rather than a still WebP */
+export function isAnimatedSticker(doc: Api.Document): boolean {
+  return doc.mimeType === "application/x-tgsticker" || doc.mimeType === "video/webm";
 }
 
 function formatCoordinates(geo: Api.TypeGeoPoint): string | undefined {
@@ -35,8 +40,7 @@ function extractDocument(msg: Api.Message, media: Api.MessageMediaDocument, doc:
   const base = { fileId: `document:${doc.id.toString()}`, fileSize: Number(doc.size), mimeType: doc.mimeType, _message: msg };
   const sticker = documentAttribute(doc, Api.DocumentAttributeSticker);
   if (sticker) {
-    const isAnimated = doc.mimeType === "application/x-tgsticker" || doc.mimeType === "video/webm";
-    return { ...base, type: "sticker", emoji: sticker.alt, isAnimated };
+    return { ...base, type: "sticker", emoji: sticker.alt, isAnimated: isAnimatedSticker(doc) };
   }
 
   const audio = documentAttribute(doc, Api.DocumentAttributeAudio);

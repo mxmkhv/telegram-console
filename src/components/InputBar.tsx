@@ -14,6 +14,7 @@ interface InputBarProps {
   onSubmit: (text: string, chatId: string) => void;
   onEdit?: (text: string, chatId: string, messageId: number) => void;
   onSendImage?: (chatId: string) => Promise<ImageSendResult>;
+  onOpenStickerPicker?: () => void;
   onStartEdit?: () => void;
   selectedChatId: string | null;
   replyingToMessage?: Message | null;
@@ -45,6 +46,7 @@ function InputBarInner({
   onSubmit,
   onEdit,
   onSendImage,
+  onOpenStickerPicker,
   onStartEdit,
   selectedChatId,
   replyingToMessage,
@@ -231,6 +233,14 @@ function InputBarInner({
         return;
       }
 
+      // Pick a sticker to send (Ctrl+S); it replies if you're replying
+      if (key.ctrl && input === "s") {
+        if (!selectedChatId) showStatus("Select a chat first");
+        else if (editingMessage) showStatus("Finish or cancel the edit first (^X)");
+        else onOpenStickerPicker?.();
+        return;
+      }
+
       // Home (Ctrl+A)
       if (key.ctrl && input === "a") {
         setState((s) => ({ ...s, cursor: 0 }));
@@ -387,6 +397,7 @@ export const InputBar = memo(InputBarInner, (prev, next) => {
     prev.onSubmit === next.onSubmit &&
     prev.onEdit === next.onEdit &&
     prev.onSendImage === next.onSendImage &&
+    prev.onOpenStickerPicker === next.onOpenStickerPicker &&
     prev.onStartEdit === next.onStartEdit &&
     prev.replyingToMessage === next.replyingToMessage &&
     prev.editingMessage === next.editingMessage &&

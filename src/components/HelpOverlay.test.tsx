@@ -9,13 +9,13 @@ const DOWN = "\x1b[B";
 describe("HelpOverlay", () => {
   it("lists every section side by side when there's room", () => {
     const frame = render(<HelpOverlay onClose={() => {}} width={100} height={40} />).lastFrame() ?? "";
-    for (const title of ["Anywhere", "Header", "Chats", "Messages", "Typing", "Reactions", "Media viewer"]) {
+    for (const title of ["Anywhere", "Header", "Chats", "Messages", "Typing", "Reactions", "Stickers", "Media viewer"]) {
       expect(frame).toContain(title);
     }
     expect(frame).toMatch(/r\s+React, or remove your reaction/);
     expect(frame).toMatch(/R\s+Reply/);
     // Two columns: the first and a later section share a line
-    expect(frame.split("\n").some((line) => line.includes("Anywhere") && line.includes("Messages"))).toBe(true);
+    expect(frame.split("\n").some((line) => line.includes("Anywhere") && line.includes("Typing"))).toBe(true);
     expect(frame).not.toContain("scroll");
   });
 

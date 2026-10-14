@@ -96,7 +96,8 @@ function splitLines(text: string): string[] {
 const keepTogether = (text: string) => text.replace(/ /g, "\u00A0");
 
 function hasViewableMedia(msg: Message): boolean {
-  return !!msg.media && canViewMedia(msg.media);
+  // An unsent message has nothing to download yet
+  return !!msg.media && canViewMedia(msg.media) && msg.delivery?.action !== "send";
 }
 
 // Reply names come from the messages loaded here: live messages arrive

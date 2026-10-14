@@ -33,6 +33,7 @@ export interface AppState {
   reactionOverlay: ReactionOverlay;
   showChatSwitcher: boolean;
   showHelp: boolean;
+  showStickerPicker: boolean;
 }
 
 // The quick-reaction row or the full emoji grid, pinned to the message it was
@@ -86,6 +87,7 @@ export type AppAction =
   | { type: "SET_REACTION_OVERLAY"; payload: ReactionOverlay }
   | { type: "SET_SHOW_CHAT_SWITCHER"; payload: boolean }
   | { type: "SET_SHOW_HELP"; payload: boolean }
+  | { type: "SET_SHOW_STICKER_PICKER"; payload: boolean }
   | { type: "SHOW_NOTICE"; payload: Omit<Notice, "id"> }
   | { type: "CLEAR_NOTICE"; payload?: { id: number } }
   | { type: "SET_TYPING"; payload: { chatId: string; isTyping: boolean } }
@@ -118,6 +120,7 @@ export const initialState: AppState = {
   reactionOverlay: null,
   showChatSwitcher: false,
   showHelp: false,
+  showStickerPicker: false,
 };
 
 // An open overlay owns the keyboard: global shortcuts and panel navigation
@@ -129,6 +132,7 @@ export function isOverlayOpen(state: AppState): boolean {
     state.reactionOverlay !== null ||
     state.showChatSwitcher ||
     state.showHelp ||
+    state.showStickerPicker ||
     state.mediaPanel.isOpen
   );
 }
@@ -623,6 +627,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     case "SET_SHOW_HELP":
       return { ...state, showHelp: action.payload };
+
+    case "SET_SHOW_STICKER_PICKER":
+      return { ...state, showStickerPicker: action.payload };
 
     case "SHOW_NOTICE":
       return { ...state, notice: { ...action.payload, id: (state.notice?.id ?? 0) + 1 } };

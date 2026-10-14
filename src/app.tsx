@@ -20,6 +20,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { LogoutPrompt } from "./components/LogoutPrompt";
 import { ChatSwitcher } from "./components/ChatSwitcher";
 import { HelpOverlay } from "./components/HelpOverlay";
+import { StickerPicker } from "./components/StickerPicker";
 import { MediaPanel } from "./components/MediaPanel";
 import { BlankScreen } from "./components/BlankScreen";
 import { createReadSync } from "./services/readSync";
@@ -39,7 +40,7 @@ import { useTerminalNotifications } from "./hooks/useTerminalNotifications";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, FocusedPanel, LoadStatus, Message } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, FocusedPanel, LoadStatus, Message, Sticker, StickerSource } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
@@ -54,7 +55,12 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
 
   // The open chat is on screen unless something covers its messages
   const messagesCovered =
-    state.currentView !== "chat" || state.mediaPanel.isOpen || state.showChatSwitcher || state.showHelp || state.showLogoutPrompt;
+    state.currentView !== "chat" ||
+    state.mediaPanel.isOpen ||
+    state.showChatSwitcher ||
+    state.showHelp ||
+    state.showStickerPicker ||
+    state.showLogoutPrompt;
   const { newWhileHidden } = useTerminalNotifications({
     write: writeToTerminal,
     telegramService,
@@ -355,9 +361,12 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
   // Sends the local message and swaps in Telegram's copy once it's accepted
   const deliverSend = useCallback(
     async (chatId: string, local: Message) => {
+      const sticker = local.delivery?.action === "send" ? local.delivery.sticker : undefined;
       try {
         const message = await withTimeout(
-          telegramService.sendMessage(chatId, local.text, local.replyToMsgId, local.replyToSenderName),
+          sticker
+            ? telegramService.sendSticker(chatId, sticker, local.replyToMsgId, local.replyToSenderName)
+            : telegramService.sendMessage(chatId, local.text, local.replyToMsgId, local.replyToSenderName),
           DELIVERY_TIMEOUT_MS,
           DELIVERY_TIMEOUT_REASON
         );
@@ -365,9 +374,9 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
       } catch (err) {
         dispatch({
           type: "SET_DELIVERY",
-          payload: { chatId, messageId: local.id, text: local.text, delivery: { action: "send", status: "failed" } },
+          payload: { chatId, messageId: local.id, text: local.text, delivery: { action: "send", status: "failed", sticker } },
         });
-        showError(`Message not sent: Esc, then Enter on it to retry or x to discard (${describeError(err)})`);
+        showError(`${sticker ? "Sticker" : "Message"} not sent: Esc, then Enter on it to retry or x to discard (${describeError(err)})`);
       }
     },
     [telegramService, dispatch, showError]
@@ -414,6 +423,54 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
       void deliverSend(chatId, local);
     },
     [dispatch, deliverSend, state.replyingToMessage]
+  );
+
+  const openStickerPicker = useCallback(() => {
+    dispatch({ type: "SET_SHOW_STICKER_PICKER", payload: true });
+  }, [dispatch]);
+
+  const closeStickerPicker = useCallback(() => {
+    dispatch({ type: "SET_SHOW_STICKER_PICKER", payload: false });
+  }, [dispatch]);
+
+  const loadStickerSources = useCallback(
+    () => withTimeout(telegramService.getStickerSources(), LOAD_TIMEOUT_MS, "no response from Telegram"),
+    [telegramService]
+  );
+
+  const loadStickers = useCallback(
+    (source: StickerSource) => withTimeout(telegramService.getStickers(source), LOAD_TIMEOUT_MS, "no response from Telegram"),
+    [telegramService]
+  );
+
+  // Shown right away as pending, like a typed message, and sent as a reply
+  // when you're replying
+  const handleSendSticker = useCallback(
+    (sticker: Sticker) => {
+      const chatId = stateRef.current.selectedChatId;
+      dispatch({ type: "SET_SHOW_STICKER_PICKER", payload: false });
+      if (!chatId) {
+        showError("Sticker not sent: open a chat first");
+        return;
+      }
+      const replyTo = stateRef.current.replyingToMessage;
+      const local: Message = {
+        id: nextLocalId.current--,
+        senderId: "me",
+        senderName: "You",
+        text: "",
+        timestamp: new Date(),
+        isOutgoing: true,
+        media: { type: "sticker", emoji: sticker.emoji, isAnimated: sticker.isAnimated },
+        replyToMsgId: replyTo?.id,
+        replyToSenderName: replyTo?.senderName,
+        delivery: { action: "send", status: "pending", sticker },
+      };
+      dispatch({ type: "ADD_MESSAGE", payload: { chatId, message: local } });
+      dispatch({ type: "SET_REPLYING_TO", payload: null });
+      void deliverSend(chatId, local);
+    },
+    [dispatch, deliverSend, showError]
   );
 
   const handleRetryDelivery = useCallback(
@@ -862,6 +919,18 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
               maxRows={Math.min(12, panelHeight - 6)}
             />
           </Box>
+        ) : state.showStickerPicker ? (
+          <Box flexGrow={1} alignItems="center" justifyContent="center">
+            <StickerPicker
+              loadSources={loadStickerSources}
+              loadStickers={loadStickers}
+              onSelect={handleSendSticker}
+              onClose={closeStickerPicker}
+              replyingTo={state.replyingToMessage?.senderName}
+              width={Math.min(60, terminalWidth - 2)}
+              rows={Math.max(1, Math.min(8, panelHeight - 6))}
+            />
+          </Box>
         ) : state.showHelp ? (
           <Box flexGrow={1} alignItems="center" justifyContent="center">
             <HelpOverlay
@@ -943,6 +1012,7 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
               onSubmit={handleSendMessage}
               onEdit={handleEditMessage}
               onSendImage={handleSendImage}
+              onOpenStickerPicker={openStickerPicker}
               onStartEdit={handleStartEdit}
               selectedChatId={state.selectedChatId}
               replyingToMessage={state.replyingToMessage}

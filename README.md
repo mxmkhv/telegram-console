@@ -121,6 +121,7 @@ Press `?` in the app for the full list. `^` means Ctrl.
 | `↑↓`             | Move between lines              |
 | `^X`             | Cancel reply or edit            |
 | `^V`             | Send the image on the clipboard |
+| `^S`             | Send a sticker                  |
 | `^A` `^E`        | Jump to start / end             |
 | `Esc` `Tab`      | Leave the input; draft is kept  |
 
@@ -131,6 +132,17 @@ Press `?` in the app for the full list. `^` means Ctrl.
 | `←→`    | Choose (arrows in the full grid)   |
 | `Enter` | React; on [...] open the full grid |
 | `Esc`   | Cancel                             |
+
+#### Stickers
+
+| Key         | Action        |
+| ----------- | ------------- |
+| `Tab`       | Next pack     |
+| `Shift+Tab` | Previous pack |
+| `Arrows`    | Choose        |
+| `Enter`     | Send          |
+| `^R`        | Retry loading |
+| `Esc`       | Close         |
 
 #### Media viewer
 

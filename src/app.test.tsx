@@ -885,3 +885,107 @@ describe("MainApp changes made elsewhere", () => {
     expect(marked).toEqual([["1", newest.id], ["1", arrival.id]]);
   });
 });
+
+describe("MainApp stickers", () => {
+  let svc: ReturnType<typeof createMockTelegramService>;
+  let failures: MockFailures;
+  beforeEach(() => {
+    failures = {};
+    svc = createMockTelegramService({ failures });
+  });
+  afterEach(async () => { await svc.disconnect(); });
+
+  const wait = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+  const renderApp = () =>
+    render(
+      <AppProvider telegramService={svc} initialUiMode="full">
+        <MainApp telegramService={svc} onLogout={() => {}} onToggleNoColor={() => {}} />
+      </AppProvider>
+    );
+  const press = async (stdin: { write: (s: string) => void }, ...keys: string[]) => {
+    for (const key of keys) {
+      stdin.write(key);
+      await wait();
+    }
+  };
+  const ENTER = "\r";
+  const ESC = "\x1b";
+  const UP = "\x1b[A";
+  const CTRL_S = "\x13";
+  // The mock takes 50ms for the packs, then 50ms for the open one
+  const openPicker = async (stdin: { write: (s: string) => void }) => {
+    await press(stdin, CTRL_S);
+    await wait(150);
+  };
+
+  it("Ctrl+S picks a sticker and sends it, keeping the draft", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "draft");
+    await openPicker(stdin);
+    expect(lastFrame()).toContain("Send a sticker");
+
+    await press(stdin, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Send a sticker");
+    expect(frame).toContain("You: [😀 Sticker: 😊]");
+    expect(frame).not.toContain("not sent");
+    expect(frame).toContain("> draft");
+  });
+
+  it("replies with the sticker when replying", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, ESC, "R");
+    await openPicker(stdin);
+    expect(lastFrame()).toContain("Reply to Elon with a sticker");
+
+    await press(stdin, ENTER);
+    const frame = lastFrame() ?? "";
+    // A no-break space after the reply's name
+    expect(frame).toMatch(/↩Elon:\sYou: \[😀 Sticker: 😊\]/);
+    expect(frame).not.toContain("Replying to");
+    expect((await svc.getMessages("1")).at(-1)?.replyToMsgId).toBe(8);
+  });
+
+  it("keeps a failed sticker marked as not sent, and Enter on it retries", async () => {
+    failures.send = true;
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER);
+    await openPicker(stdin);
+    await press(stdin, ENTER);
+    expect(lastFrame()).toContain("Sticker not sent");
+    expect(lastFrame()).toContain("! not sent");
+
+    failures.send = false;
+    await press(stdin, ESC, ENTER);
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("not sent");
+    expect(frame.match(/You: \[😀 Sticker: 😊\]/g)).toHaveLength(1);
+  });
+
+  it("Esc closes the picker back to the input, draft and all", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "draft");
+    await openPicker(stdin);
+    await press(stdin, ESC, "x");
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Send a sticker");
+    expect(frame).toContain("> draftx");
+  });
+
+  it("Ctrl+S while editing asks to finish the edit first", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, UP, CTRL_S);
+    expect(lastFrame()).not.toContain("Send a sticker");
+    expect(lastFrame()).toContain("Finish or cancel the edit first");
+  });
+});
