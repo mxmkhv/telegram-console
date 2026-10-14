@@ -39,7 +39,7 @@ function setup(overrides: Partial<React.ComponentProps<typeof StickerPicker>> = 
       loadStickers={async (source) => STICKERS[keyOf(source)]!}
       onSelect={(sticker) => sent.push(sticker)}
       onClose={() => closed++}
-      // Six columns: 4 for the border and padding, 4 per sticker
+      // 4 for the border and padding, then six 4-wide cells
       width={28}
       rows={1}
       {...overrides}
@@ -101,6 +101,20 @@ describe("StickerPicker", () => {
 
     await press(stdin, ENTER);
     expect(sent.map((s) => s.emoji)).toEqual(["🙀"]);
+  });
+
+  it("an arrow pressed while a tab loads leaves the first sticker selected", async () => {
+    let finish = () => {};
+    const { stdin, lastFrame, sent } = setup({
+      loadStickers: (source) => new Promise((resolve) => (finish = () => resolve(STICKERS[keyOf(source)]!))),
+    });
+    await wait();
+    await press(stdin, RIGHT);
+    finish();
+    await wait();
+    await press(stdin, ENTER);
+    expect(lastFrame()).toContain("1/3");
+    expect(sent.map((s) => s.id)).toEqual(["recent-0"]);
   });
 
   it("names who the sticker replies to", async () => {

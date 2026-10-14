@@ -968,6 +968,18 @@ describe("MainApp stickers", () => {
     expect(frame.match(/You: \[😀 Sticker: 😊\]/g)).toHaveLength(1);
   });
 
+  it("Esc closes the picker back to the input, draft and all", async () => {
+    const { lastFrame, stdin } = renderApp();
+    await wait(250);
+
+    await press(stdin, ENTER, "draft");
+    await openPicker(stdin);
+    await press(stdin, ESC, "x");
+    const frame = lastFrame() ?? "";
+    expect(frame).not.toContain("Send a sticker");
+    expect(frame).toContain("> draftx");
+  });
+
   it("Ctrl+S while editing asks to finish the edit first", async () => {
     const { lastFrame, stdin } = renderApp();
     await wait(250);

@@ -60,15 +60,19 @@ export interface MediaAttachment {
   isAnimated?: boolean;     // TGS/video stickers
   fileName?: string;
   duration?: number;        // for voice/video in seconds
-  _message: Api.Message;    // GramJS reference for download
+  _message?: Api.Message;   // GramJS reference for download; none until Telegram has it
 }
 
 /** A tab in the sticker picker */
 export type StickerSource =
   | { kind: "recent"; title: string }
   | { kind: "faved"; title: string }
-  /** One of your installed packs */
-  | { kind: "pack"; title: string; id: string };
+  | {
+      kind: "pack";
+      title: string;
+      /** One of your installed packs */
+      id: string;
+    };
 
 export interface Sticker {
   /** Telegram's id for the sticker's file */
@@ -132,7 +136,8 @@ export interface Message {
 // A send or edit made from this client that Telegram hasn't confirmed yet.
 // Unsent messages carry a negative local id until the server assigns one.
 export type Delivery =
-  | { action: "send"; status: "pending" | "failed" }
+  // A sticker send keeps the sticker, so a retry sends it again
+  | { action: "send"; status: "pending" | "failed"; sticker?: Sticker }
   | { action: "edit"; status: "pending" | "failed"; originalText: string };
 
 // Transient feedback line above the input. Sticky notices stay until replaced.
@@ -162,7 +167,7 @@ export interface TelegramService {
   getStickerSources(): Promise<StickerSource[]>;
   getStickers(source: StickerSource): Promise<Sticker[]>;
   /** One that getStickers returned */
-  sendSticker(chatId: string, sticker: Sticker, replyToMsgId?: number): Promise<Message>;
+  sendSticker(chatId: string, sticker: Sticker, replyToMsgId?: number, replyToSenderName?: string): Promise<Message>;
   editMessage(chatId: string, messageId: number, newText: string): Promise<Message>;
   markAsRead(chatId: string, maxMessageId?: number): Promise<boolean>;
   sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean>;

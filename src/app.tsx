@@ -40,7 +40,7 @@ import { useTerminalNotifications } from "./hooks/useTerminalNotifications";
 import { createTelegramService } from "./services/telegram";
 import { createMockTelegramService, mockFailuresFromEnv } from "./services/telegram.mock";
 import { getClipboardImage } from "./services/clipboard";
-import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, FocusedPanel, LoadStatus, MediaAttachment, Message, Sticker, StickerSource } from "./types";
+import type { AppConfig, TelegramService, LogoutMode, ImageSendResult, ChatDraft, FocusedPanel, LoadStatus, Message, Sticker, StickerSource } from "./types";
 
 interface MainAppProps {
   telegramService: TelegramService;
@@ -358,27 +358,23 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
     [dispatch, handleSelectChat]
   );
 
-  // Stickers being sent, by the local message standing in for each: a retry sends it again
-  const stickerSends = useRef(new Map<number, Sticker>());
-
   // Sends the local message and swaps in Telegram's copy once it's accepted
   const deliverSend = useCallback(
     async (chatId: string, local: Message) => {
-      const sticker = stickerSends.current.get(local.id);
+      const sticker = local.delivery?.action === "send" ? local.delivery.sticker : undefined;
       try {
         const message = await withTimeout(
           sticker
-            ? telegramService.sendSticker(chatId, sticker, local.replyToMsgId)
+            ? telegramService.sendSticker(chatId, sticker, local.replyToMsgId, local.replyToSenderName)
             : telegramService.sendMessage(chatId, local.text, local.replyToMsgId, local.replyToSenderName),
           DELIVERY_TIMEOUT_MS,
           DELIVERY_TIMEOUT_REASON
         );
-        stickerSends.current.delete(local.id);
         dispatch({ type: "CONFIRM_MESSAGE", payload: { chatId, localId: local.id, message } });
       } catch (err) {
         dispatch({
           type: "SET_DELIVERY",
-          payload: { chatId, messageId: local.id, text: local.text, delivery: { action: "send", status: "failed" } },
+          payload: { chatId, messageId: local.id, text: local.text, delivery: { action: "send", status: "failed", sticker } },
         });
         showError(`${sticker ? "Sticker" : "Message"} not sent: Esc, then Enter on it to retry or x to discard (${describeError(err)})`);
       }
@@ -453,7 +449,10 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
     (sticker: Sticker) => {
       const chatId = stateRef.current.selectedChatId;
       dispatch({ type: "SET_SHOW_STICKER_PICKER", payload: false });
-      if (!chatId) return;
+      if (!chatId) {
+        showError("Sticker not sent: open a chat first");
+        return;
+      }
       const replyTo = stateRef.current.replyingToMessage;
       const local: Message = {
         id: nextLocalId.current--,
@@ -462,18 +461,16 @@ export function MainApp({ telegramService, onLogout, onToggleNoColor, writeToTer
         text: "",
         timestamp: new Date(),
         isOutgoing: true,
-        // Nothing to download until Telegram has it
-        media: { type: "sticker", emoji: sticker.emoji, isAnimated: sticker.isAnimated } as MediaAttachment,
+        media: { type: "sticker", emoji: sticker.emoji, isAnimated: sticker.isAnimated },
         replyToMsgId: replyTo?.id,
         replyToSenderName: replyTo?.senderName,
-        delivery: { action: "send", status: "pending" },
+        delivery: { action: "send", status: "pending", sticker },
       };
-      stickerSends.current.set(local.id, sticker);
       dispatch({ type: "ADD_MESSAGE", payload: { chatId, message: local } });
       dispatch({ type: "SET_REPLYING_TO", payload: null });
       void deliverSend(chatId, local);
     },
-    [dispatch, deliverSend]
+    [dispatch, deliverSend, showError]
   );
 
   const handleRetryDelivery = useCallback(

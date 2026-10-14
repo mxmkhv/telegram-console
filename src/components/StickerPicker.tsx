@@ -15,7 +15,7 @@ interface StickerPickerProps {
   /** Sender of the message being replied to */
   replyingTo?: string;
   width: number;
-  /** Grid rows; the picker keeps this height whatever the tab holds */
+  /** Grid rows */
   rows: number;
 }
 
@@ -109,6 +109,8 @@ function StickerPickerInner({ loadSources, loadStickers, onSelect, onClose, repl
     } else if (key.return) {
       const sticker = stickers[selected];
       if (sticker) onSelect(sticker);
+    } else if (stickers.length === 0) {
+      // Nothing to move through while a tab loads, or in an empty one
     } else if (key.leftArrow) {
       setIndex(Math.max(0, selected - 1));
     } else if (key.rightArrow) {
@@ -138,10 +140,11 @@ function StickerPickerInner({ loadSources, loadStickers, onSelect, onClose, repl
   if (sources.status === "loading") status = { text: "Loading your stickers…" };
   else if (sources.status === "error") {
     status = { text: `Couldn't load your sticker packs: ^R to retry (${sources.error})`, isError: true };
-  } else if (!tab || tab.status === "loading") status = { text: `Loading ${source?.title ?? "stickers"}…` };
+  } else if (!source) status = { text: "No stickers yet. Add some in Telegram to see them here" };
+  else if (!tab || tab.status === "loading") status = { text: `Loading ${source.title}…` };
   else if (tab.status === "error") {
-    status = { text: `Couldn't load ${source?.title}: ^R to retry (${tab.error})`, isError: true };
-  } else if (stickers.length === 0) status = { text: EMPTY_TABS[source?.kind ?? "pack"] };
+    status = { text: `Couldn't load ${source.title}: ^R to retry (${tab.error})`, isError: true };
+  } else if (stickers.length === 0) status = { text: EMPTY_TABS[source.kind] };
 
   const gridLines = Array.from({ length: gridRows }, (_, i) => {
     const row = firstRow + i;

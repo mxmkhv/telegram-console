@@ -5,9 +5,6 @@ import { MOCK_STICKER_WEBP } from "./mockSticker";
 
 const MOCK_STICKER_FILE_ID = "document:mock-sticker";
 
-// No GramJS message behind it: downloadMedia only has bytes for the mock sticker
-const mockMedia = (media: Omit<MediaAttachment, "_message">) => media as MediaAttachment;
-
 const MOCK_CHATS: Chat[] = [
   { id: "1", title: "Elon Musk", unreadCount: 47, isGroup: false },
   { id: "2", title: "Donald Trump", unreadCount: 3, isGroup: false },
@@ -59,7 +56,7 @@ const MOCK_MESSAGES: Record<string, Message[]> = {
     { id: 5, senderId: "3", senderName: "Satoshi", text: "Yes", timestamp: new Date("2026-01-19T10:04:00"), isOutgoing: false },
     { id: 6, senderId: "me", senderName: "You", text: "That doesn't answer my question", timestamp: new Date("2026-01-19T10:05:00"), isOutgoing: true },
     { id: 7, senderId: "3", senderName: "Satoshi", text: "Exactly 😉", timestamp: new Date("2026-01-19T10:06:00"), isOutgoing: false },
-    { id: 8, senderId: "3", senderName: "Satoshi", text: "", timestamp: new Date("2026-01-19T10:07:00"), isOutgoing: false, media: mockMedia({ type: "sticker", emoji: "😊", fileId: MOCK_STICKER_FILE_ID, mimeType: "image/webp" }) },
+    { id: 8, senderId: "3", senderName: "Satoshi", text: "", timestamp: new Date("2026-01-19T10:07:00"), isOutgoing: false, media: { type: "sticker", emoji: "😊", fileId: MOCK_STICKER_FILE_ID, mimeType: "image/webp" } },
   ],
   // Tech Bros Anonymous (group)
   "4": [
@@ -71,11 +68,11 @@ const MOCK_MESSAGES: Record<string, Message[]> = {
     { id: 6, senderId: "me", senderName: "You", text: "Why am I in this group", timestamp: new Date("2026-01-19T11:05:00"), isOutgoing: true },
     { id: 7, senderId: "elon", senderName: "Elon", text: "Because you built a terminal Telegram client. That's peak tech bro energy.", timestamp: new Date("2026-01-19T11:06:00"), isOutgoing: false },
     { id: 8, senderId: "bezos", senderName: "Bezos", text: "Do you want funding? I'll take 99% equity.", timestamp: new Date("2026-01-19T11:07:00"), isOutgoing: false },
-    { id: 9, senderId: "bezos", senderName: "Bezos", text: "", timestamp: new Date("2026-01-19T11:08:00"), isOutgoing: false, media: mockMedia({ type: "poll", title: "Should we buy the moon?" }) },
+    { id: 9, senderId: "bezos", senderName: "Bezos", text: "", timestamp: new Date("2026-01-19T11:08:00"), isOutgoing: false, media: { type: "poll", title: "Should we buy the moon?" } },
     { id: 10, senderId: "elon", senderName: "Elon", text: "Starship launch window opens Friday", timestamp: new Date("2026-01-19T11:09:00"), isOutgoing: false, forwardedFrom: "SpaceX" },
-    { id: 11, senderId: "gates", senderName: "Gates", text: "Beta build attached", timestamp: new Date("2026-01-19T11:10:00"), isOutgoing: false, media: mockMedia({ type: "document", fileName: "metaverse_for_windows.iso", fileSize: 4_509_715_456 }) },
-    { id: 12, senderId: "zuck", senderName: "Zuck", text: "", timestamp: new Date("2026-01-19T11:11:00"), isOutgoing: false, media: mockMedia({ type: "location", title: "Meta HQ, 1 Hacker Way, Menlo Park" }) },
-    { id: 13, senderId: "zuck", senderName: "Zuck", text: "Here's the demo", timestamp: new Date("2026-01-19T11:12:00"), isOutgoing: false, replyToMsgId: 3, media: mockMedia({ type: "video", width: 1920, height: 1080, duration: 42, fileSize: 18_874_368 }) },
+    { id: 11, senderId: "gates", senderName: "Gates", text: "Beta build attached", timestamp: new Date("2026-01-19T11:10:00"), isOutgoing: false, media: { type: "document", fileName: "metaverse_for_windows.iso", fileSize: 4_509_715_456 } },
+    { id: 12, senderId: "zuck", senderName: "Zuck", text: "", timestamp: new Date("2026-01-19T11:11:00"), isOutgoing: false, media: { type: "location", title: "Meta HQ, 1 Hacker Way, Menlo Park" } },
+    { id: 13, senderId: "zuck", senderName: "Zuck", text: "Here's the demo", timestamp: new Date("2026-01-19T11:12:00"), isOutgoing: false, replyToMsgId: 3, media: { type: "video", width: 1920, height: 1080, duration: 42, fileSize: 18_874_368 } },
   ],
   // Mark Zuckerberg
   "5": [
@@ -121,7 +118,6 @@ const MOCK_MESSAGES: Record<string, Message[]> = {
   ],
 };
 
-// Favorites left empty, like most accounts have them
 const MOCK_STICKER_SOURCES: StickerSource[] = [
   { kind: "recent", title: "Recent" },
   { kind: "faved", title: "Favorites" },
@@ -132,7 +128,6 @@ const MOCK_STICKER_SOURCES: StickerSource[] = [
   { kind: "pack", id: "space", title: "Space Cats" },
 ];
 
-// Every mock sticker downloads as the one mock sticker image
 const mockStickers = (prefix: string, emojis: string) =>
   Array.from(emojis.matchAll(/\p{Extended_Pictographic}\uFE0F?/gu), ([emoji], i): Sticker => ({
     id: `${prefix}-${i}`,
@@ -142,6 +137,7 @@ const mockStickers = (prefix: string, emojis: string) =>
 
 const MOCK_STICKERS: Record<string, Sticker[]> = {
   recent: mockStickers("recent", "😊👍🔥😂🐱"),
+  // Shows the picker's empty tab
   faved: [],
   smileys: mockStickers("smileys", "😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗😚😙😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏"),
   animals: mockStickers("animals", "🐶🐱🐭🐹🐰🦊🐻🐼🐨🐯🦁🐮🐷🐸🐵🐔"),
@@ -181,7 +177,7 @@ export interface MockFailures {
   getMessages?: boolean;
   send?: boolean;
   edit?: boolean;
-  /** Loading the sticker picker's packs */
+  /** Loading the sticker picker's tabs and their stickers; sending fails under `send` */
   stickers?: boolean;
 }
 
@@ -448,7 +444,7 @@ export function createMockTelegramService(options?: {
       const fileName = filePath.split("/").pop() ?? "image.png";
       // No real Api.Message in mock mode; downloadMedia returns undefined, so
       // the message list just shows a photo indicator with the file name.
-      const media = { type: "photo", fileName } as MediaAttachment;
+      const media: MediaAttachment = { type: "photo", fileName };
       const message: Message = {
         id: Date.now(),
         senderId: "me",
@@ -477,7 +473,7 @@ export function createMockTelegramService(options?: {
       return MOCK_STICKERS[source.kind === "pack" ? source.id : source.kind] ?? [];
     },
 
-    async sendSticker(chatId: string, sticker: Sticker, replyToMsgId?: number) {
+    async sendSticker(chatId: string, sticker: Sticker, replyToMsgId?: number, replyToSenderName?: string) {
       await new Promise((r) => setTimeout(r, 50));
       failIf(failures.send, "Mock: CHAT_SEND_STICKERS_FORBIDDEN");
       failIf(offline, "Mock: not connected");
@@ -488,8 +484,10 @@ export function createMockTelegramService(options?: {
         text: "",
         timestamp: new Date(),
         isOutgoing: true,
-        media: mockMedia({ type: "sticker", emoji: sticker.emoji, isAnimated: sticker.isAnimated, fileId: MOCK_STICKER_FILE_ID, mimeType: "image/webp" }),
+        // Every mock sticker downloads as the one mock sticker image
+        media: { type: "sticker", emoji: sticker.emoji, isAnimated: sticker.isAnimated, fileId: MOCK_STICKER_FILE_ID, mimeType: "image/webp" },
         replyToMsgId,
+        replyToSenderName,
       };
       (messages[chatId] ??= []).push(message);
       return message;

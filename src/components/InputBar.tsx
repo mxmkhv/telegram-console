@@ -235,8 +235,9 @@ function InputBarInner({
 
       // Pick a sticker to send (Ctrl+S); it replies if you're replying
       if (key.ctrl && input === "s") {
-        if (editingMessage) showStatus("Finish or cancel the edit first (^X)");
-        else if (selectedChatId) onOpenStickerPicker?.();
+        if (!selectedChatId) showStatus("Select a chat first");
+        else if (editingMessage) showStatus("Finish or cancel the edit first (^X)");
+        else onOpenStickerPicker?.();
         return;
       }
 

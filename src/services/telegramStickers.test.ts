@@ -25,16 +25,36 @@ const pack = new Api.StickerSet({
 });
 
 // Answers the sticker requests, and records what was sent
-function fakeClient({ expireReferences = 0 } = {}) {
+interface FakeOptions {
+  /** Sends that fail with an expired file reference before one goes through */
+  expireReferences?: number;
+  /** Fails a send with this error instead */
+  sendError?: string;
+  /** What fetching recent stickers does after the first time */
+  recentRefetch?: "fail" | "without-sticker-1";
+  /** Answers "not modified" for recent stickers */
+  notModified?: boolean;
+}
+
+function fakeClient({ expireReferences = 0, sendError, recentRefetch, notModified }: FakeOptions = {}) {
   const requests: string[] = [];
   const sent: { file: Api.Document; replyTo?: number }[] = [];
   let fileReference = "old";
   let expiring = expireReferences;
+  let recentFetches = 0;
   const client = {
     async invoke(request: Api.AnyRequest) {
       requests.push(request.className);
       if (request instanceof Api.messages.GetAllStickers) return new Api.messages.AllStickers({ hash: bigInt(0), sets: [pack] });
       if (request instanceof Api.messages.GetRecentStickers) {
+        if (notModified) return new Api.messages.RecentStickersNotModified();
+        if (recentFetches++ > 0 && recentRefetch === "fail") {
+          recentRefetch = undefined;
+          throw new Error("Not connected");
+        }
+        if (recentFetches > 1 && recentRefetch === "without-sticker-1") {
+          return new Api.messages.RecentStickers({ hash: bigInt(0), packs: [], stickers: [sticker(2, "🔥")], dates: [] });
+        }
         return new Api.messages.RecentStickers({
           hash: bigInt(0),
           packs: [],
@@ -50,6 +70,7 @@ function fakeClient({ expireReferences = 0 } = {}) {
     },
     async sendMessage(_chatId: string, params: { file: Api.Document; replyTo?: number }) {
       sent.push(params);
+      if (sendError) throw new errors.RPCError(sendError, new Api.messages.SendMedia({} as never), 403);
       if (expiring > 0) {
         expiring--;
         // Telegram hands out a fresh reference with the next fetch
@@ -124,6 +145,38 @@ describe("sticker store", () => {
     const [smile] = await store.getStickers({ kind: "recent", title: "Recent" });
     await expect(store.sendSticker("7", smile!)).rejects.toThrow("FILE_REFERENCE_EXPIRED");
     expect(sent).toHaveLength(2);
+  });
+
+  it("keeps a sticker sendable when refreshing its reference fails", async () => {
+    const { client } = fakeClient({ expireReferences: 1, recentRefetch: "fail" });
+    const store = createStickerStore(client);
+    const [smile] = await store.getStickers({ kind: "recent", title: "Recent" });
+    await expect(store.sendSticker("7", smile!)).rejects.toThrow("Not connected");
+    // Retrying from the failed message works once the network's back
+    expect((await store.sendSticker("7", smile!)).id).toBe(500);
+  });
+
+  it("says so when the sticker is gone from where it came from", async () => {
+    const { client } = fakeClient({ expireReferences: 1, recentRefetch: "without-sticker-1" });
+    const store = createStickerStore(client);
+    const [smile] = await store.getStickers({ kind: "recent", title: "Recent" });
+    await expect(store.sendSticker("7", smile!)).rejects.toThrow("This sticker isn't available anymore");
+  });
+
+  it("refetches only for an expired reference, not other errors", async () => {
+    const { client, sent, requests } = fakeClient({ sendError: "CHAT_SEND_STICKERS_FORBIDDEN" });
+    const store = createStickerStore(client);
+    const [smile] = await store.getStickers({ kind: "recent", title: "Recent" });
+    await expect(store.sendSticker("7", smile!)).rejects.toThrow("CHAT_SEND_STICKERS_FORBIDDEN");
+    expect(sent).toHaveLength(1);
+    expect(requests.filter((r) => r === "messages.GetRecentStickers")).toHaveLength(1);
+  });
+
+  it("fails loudly on a \"not modified\" answer instead of showing nothing", async () => {
+    const store = createStickerStore(fakeClient({ notModified: true }).client);
+    await expect(store.getStickers({ kind: "recent", title: "Recent" })).rejects.toThrow(
+      "Telegram didn't send your recent stickers. Try again",
+    );
   });
 
   it("says so when a sticker wasn't loaded first", async () => {
