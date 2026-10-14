@@ -22,9 +22,14 @@ export function isWebp(buffer: Buffer): boolean {
 }
 
 export async function webpToPng(buffer: Buffer): Promise<Buffer> {
-  await initDecoder();
-  // A copy: a Buffer can be a slice of a larger shared pool, which decode would read whole
-  const { data, width, height } = await decode(new Uint8Array(buffer).buffer);
-  const image = Jimp.fromBitmap({ data: Buffer.from(data.buffer, data.byteOffset, data.byteLength), width, height });
-  return image.getBuffer("image/png");
+  try {
+    await initDecoder();
+    // A copy: a Buffer can be a slice of a larger shared pool, which decode would read whole
+    const { data, width, height } = await decode(new Uint8Array(buffer).buffer);
+    const image = Jimp.fromBitmap({ data: Buffer.from(data.buffer, data.byteOffset, data.byteLength), width, height });
+    return await image.getBuffer("image/png");
+  } catch (cause) {
+    // The decoder's own message is just "Decoding error"
+    throw new Error("Couldn't decode this WebP image. Open it in Telegram to see it", { cause });
+  }
 }

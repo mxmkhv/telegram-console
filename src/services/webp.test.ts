@@ -42,7 +42,9 @@ describe("webpToPng", () => {
 
   it("fails loudly on corrupt data", async () => {
     const corrupt = Buffer.concat([MOCK_STICKER_WEBP.subarray(0, 12), Buffer.alloc(64)]);
-    expect(webpToPng(corrupt)).rejects.toThrow();
+    await expect(webpToPng(corrupt)).rejects.toThrow("Couldn't decode this WebP image");
+    // One bad image doesn't break the decoder for the next
+    expect((await webpToPng(MOCK_STICKER_WEBP)).toString("ascii", 1, 4)).toBe("PNG");
   });
 
   it("produces something both renderers draw", async () => {

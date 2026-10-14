@@ -22,6 +22,15 @@ describe("getMediaBuffer", () => {
     expect(downloads).toBe(1);
   });
 
+  it("doesn't keep a WebP it couldn't convert", async () => {
+    const corrupt = Buffer.concat([MOCK_STICKER_WEBP.subarray(0, 12), Buffer.alloc(64)]);
+    const sticker = media("document:corrupt-test");
+    await expect(getMediaBuffer(sticker, async () => corrupt)).rejects.toThrow("Couldn't decode this WebP image");
+    // Tried again rather than failing from the cache
+    const retried = await getMediaBuffer(sticker, async () => MOCK_STICKER_WEBP);
+    expect(retried?.toString("ascii", 1, 4)).toBe("PNG");
+  });
+
   it("passes other formats through untouched", async () => {
     const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
     expect(await getMediaBuffer(media("photo:jpeg-test"), async () => jpeg)).toBe(jpeg);

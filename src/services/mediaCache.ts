@@ -29,7 +29,7 @@ export async function getMediaBuffer(
   const pending = pendingDownloads.get(key);
   if (pending) return pending;
 
-  // Converted once here, so the cache and both renderers only see formats Jimp reads
+  // WebP is converted once here, so the cache and both renderers never see it
   const downloadPromise = downloadFn().then((buffer) => (buffer && isWebp(buffer) ? webpToPng(buffer) : buffer));
   pendingDownloads.set(key, downloadPromise);
 

@@ -15,9 +15,11 @@ export default undefined;`;
 
 // src/services/webpWasm.ts reads the WebP decoder from node_modules, which
 // isn't there once installed from npm. Embed the bytes instead (~180 KB).
-// Bun's own base64 loader returns the file's text or an empty string (1.4.0).
+// Bun's own base64 loader can't: as of Bun 1.4.0 it returns the file's text or
+// an empty string.
 const webpWasm = readFileSync(fileURLToPath(import.meta.resolve("@jsquash/webp/codec/dec/webp_dec.wasm")));
 const WEBP_WASM_EMBEDDED = `export function loadWebpWasm() { return Buffer.from("${webpWasm.toString("base64")}", "base64"); }`;
+let embeddedWebpWasm = false;
 
 const result = await Bun.build({
   entrypoints: ["src/index.tsx"],
@@ -35,7 +37,10 @@ const result = await Bun.build({
     {
       name: "embedded-webp-wasm",
       setup(build) {
-        build.onLoad({ filter: /\/src\/services\/webpWasm\.ts$/ }, () => ({ contents: WEBP_WASM_EMBEDDED, loader: "js" }));
+        build.onLoad({ filter: /[\\/]src[\\/]services[\\/]webpWasm\.ts$/ }, () => {
+          embeddedWebpWasm = true;
+          return { contents: WEBP_WASM_EMBEDDED, loader: "js" };
+        });
       },
     },
   ],
@@ -44,6 +49,10 @@ const result = await Bun.build({
 if (!result.success) {
   for (const log of result.logs) console.error(log);
   throw new Error("Build failed: see the errors above");
+}
+// Otherwise the bundle would ship reading node_modules, and no sticker would open
+if (!embeddedWebpWasm) {
+  throw new Error("Build failed: src/services/webpWasm.ts wasn't replaced. Update the embedded-webp-wasm plugin's filter to its new path");
 }
 for (const output of result.outputs) {
   console.log(`${output.path.replace(`${process.cwd()}/`, "")}  ${(output.size / 1024 / 1024).toFixed(2)} MB`);

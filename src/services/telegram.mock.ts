@@ -5,7 +5,7 @@ import { MOCK_STICKER_WEBP } from "./mockSticker";
 
 const MOCK_STICKER_FILE_ID = "document:mock-sticker";
 
-// No GramJS message behind it: downloadMedia has nothing to fetch
+// No GramJS message behind it: downloadMedia only has bytes for the mock sticker
 const mockMedia = (media: Omit<MediaAttachment, "_message">) => media as MediaAttachment;
 
 const MOCK_CHATS: Chat[] = [
