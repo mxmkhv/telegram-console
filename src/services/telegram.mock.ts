@@ -1,8 +1,11 @@
 import type { TelegramService, ConnectionState, Chat, Message, MediaAttachment, ReportedReaction } from "../types";
 import { createConnectionWatchdog } from "./connectionWatchdog";
 import { createListeners } from "../utils/listeners";
+import { MOCK_STICKER_WEBP } from "./mockSticker";
 
-// No GramJS message behind it: downloadMedia has nothing to fetch
+const MOCK_STICKER_FILE_ID = "document:mock-sticker";
+
+// No GramJS message behind it: downloadMedia only has bytes for the mock sticker
 const mockMedia = (media: Omit<MediaAttachment, "_message">) => media as MediaAttachment;
 
 const MOCK_CHATS: Chat[] = [
@@ -56,6 +59,7 @@ const MOCK_MESSAGES: Record<string, Message[]> = {
     { id: 5, senderId: "3", senderName: "Satoshi", text: "Yes", timestamp: new Date("2026-01-19T10:04:00"), isOutgoing: false },
     { id: 6, senderId: "me", senderName: "You", text: "That doesn't answer my question", timestamp: new Date("2026-01-19T10:05:00"), isOutgoing: true },
     { id: 7, senderId: "3", senderName: "Satoshi", text: "Exactly 😉", timestamp: new Date("2026-01-19T10:06:00"), isOutgoing: false },
+    { id: 8, senderId: "3", senderName: "Satoshi", text: "", timestamp: new Date("2026-01-19T10:07:00"), isOutgoing: false, media: mockMedia({ type: "sticker", emoji: "😊", fileId: MOCK_STICKER_FILE_ID, mimeType: "image/webp" }) },
   ],
   // Tech Bros Anonymous (group)
   "4": [
@@ -476,9 +480,9 @@ export function createMockTelegramService(options?: {
       };
     },
 
-    async downloadMedia(_message: Message): Promise<Buffer | undefined> {
-      // Mock: return undefined since we don't have real media in mock
-      return undefined;
+    async downloadMedia(message: Message): Promise<Buffer | undefined> {
+      // The one mock attachment with real bytes behind it
+      return message.media?.fileId === MOCK_STICKER_FILE_ID ? MOCK_STICKER_WEBP : undefined;
     },
 
     async markAsRead(_chatId: string, _maxMessageId?: number): Promise<boolean> {

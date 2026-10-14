@@ -1,5 +1,6 @@
 import { LRUCache } from 'lru-cache';
 import type { MediaAttachment } from '../types/index.js';
+import { isWebp, webpToPng } from './webp.js';
 
 interface CachedMedia {
   buffer: Buffer;
@@ -28,7 +29,8 @@ export async function getMediaBuffer(
   const pending = pendingDownloads.get(key);
   if (pending) return pending;
 
-  const downloadPromise = downloadFn();
+  // WebP is converted once here, so the cache and both renderers never see it
+  const downloadPromise = downloadFn().then((buffer) => (buffer && isWebp(buffer) ? webpToPng(buffer) : buffer));
   pendingDownloads.set(key, downloadPromise);
 
   try {
