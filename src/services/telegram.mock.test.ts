@@ -78,4 +78,15 @@ describe("MockTelegramService", () => {
     unsubB();
     await service.disconnect();
   });
+
+  it("downloads a static sticker as Telegram serves it", async () => {
+    const service = createMockTelegramService();
+    await service.connect();
+    const messages = await service.getMessages("3");
+    const sticker = messages.find((m) => m.media?.type === "sticker");
+    expect(sticker).toBeDefined();
+    const buffer = await service.downloadMedia(sticker!);
+    expect(buffer?.toString("ascii", 8, 12)).toBe("WEBP");
+    await service.disconnect();
+  });
 });

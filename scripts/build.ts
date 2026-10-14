@@ -5,10 +5,19 @@
  * Usage: bun run build
  */
 
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+
 // Ink loads React DevTools only when DEV=true, but a bundler can't tell, so
 // all 270 KB of it would ship. Swap in a stub that says how to get them.
 const DEVTOOLS_STUB = `throw new Error("React DevTools aren't in the published build. Run from source with DEV=true bun run dev, after installing react-devtools-core");
 export default undefined;`;
+
+// src/services/webpWasm.ts reads the WebP decoder from node_modules, which
+// isn't there once installed from npm. Embed the bytes instead (~180 KB).
+// Bun's own base64 loader returns the file's text or an empty string (1.4.0).
+const webpWasm = readFileSync(fileURLToPath(import.meta.resolve("@jsquash/webp/codec/dec/webp_dec.wasm")));
+const WEBP_WASM_EMBEDDED = `export function loadWebpWasm() { return Buffer.from("${webpWasm.toString("base64")}", "base64"); }`;
 
 const result = await Bun.build({
   entrypoints: ["src/index.tsx"],
@@ -21,6 +30,12 @@ const result = await Bun.build({
       setup(build) {
         build.onResolve({ filter: /^react-devtools-core$/ }, () => ({ path: "react-devtools-core", namespace: "stub" }));
         build.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ contents: DEVTOOLS_STUB, loader: "js" }));
+      },
+    },
+    {
+      name: "embedded-webp-wasm",
+      setup(build) {
+        build.onLoad({ filter: /\/src\/services\/webpWasm\.ts$/ }, () => ({ contents: WEBP_WASM_EMBEDDED, loader: "js" }));
       },
     },
   ],

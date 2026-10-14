@@ -5,9 +5,16 @@ import { MediaPanel } from "./MediaPanel";
 import type { Message, MediaAttachment } from "../types/index.js";
 import type { Api } from "telegram";
 
-// Mock the media services to avoid actual media loading
+// mock.module is process-wide, so overrides of modules other tests use apply
+// only while this file's tests run, and otherwise defer to the original
+// (captured before mocking, since the mock patches the imported namespace in place).
+let mocksActive = false;
+
+// Skip real media loading
+const { getMediaBuffer: realGetMediaBuffer } = await import("../services/mediaCache.js");
 mock.module("../services/mediaCache.js", () => ({
-  getMediaBuffer: async () => Buffer.from("mock"),
+  getMediaBuffer: (...args: Parameters<typeof realGetMediaBuffer>) =>
+    mocksActive ? Promise.resolve(Buffer.from("mock")) : realGetMediaBuffer(...args),
 }));
 
 mock.module("../services/imageRenderer.js", () => ({
@@ -17,16 +24,12 @@ mock.module("../services/imageRenderer.js", () => ({
   formatMediaMetadata: () => "Photo 100x100 | 1KB",
 }));
 
-// Force the ANSI fallback path deterministically, keeping every other kittyImage
-// export real. mock.module is process-wide, so the override is scoped to this
-// file's tests and otherwise defers to the original (captured before mocking,
-// since the mock patches the imported namespace in place).
-let forceNoKitty = false;
+// Force the ANSI fallback path deterministically, keeping every other kittyImage export real
 const realKitty = await import("../services/kittyImage.js");
 const { supportsKittyGraphics: realSupports } = realKitty;
 mock.module("../services/kittyImage.js", () => ({
   ...realKitty,
-  supportsKittyGraphics: (stream?: NodeJS.WriteStream) => (forceNoKitty ? false : realSupports(stream)),
+  supportsKittyGraphics: (stream?: NodeJS.WriteStream) => (mocksActive ? false : realSupports(stream)),
 }));
 
 const mockMedia: MediaAttachment = {
@@ -52,10 +55,10 @@ const mockOnClose = () => {};
 
 describe("MediaPanel", () => {
   beforeAll(() => {
-    forceNoKitty = true;
+    mocksActive = true;
   });
   afterAll(() => {
-    forceNoKitty = false;
+    mocksActive = false;
   });
 
   it("renders with cyan border when focused", () => {
