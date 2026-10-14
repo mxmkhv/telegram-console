@@ -108,7 +108,7 @@ TG_SKIN           # "default" | "claudeCode"
 TG_NOTIFY         # "all" | "bell" | "off" (new messages in other, unmuted chats)
 TG_LOG_LEVEL      # "quiet" | "info" | "verbose"
 TG_CONFIG_DIR     # where config and session live (default ~/.config/telegram-console; tests use a temp dir)
-TG_MOCK_FAIL      # --mock only: comma list of send,edit,connect,getMessages,drop to fail
+TG_MOCK_FAIL      # --mock only: comma list of send,edit,connect,getMessages,drop,stickers to fail
 ```
 
 Config stored at `~/.config/telegram-console/config.json`. Tests never touch it: `src/testSetup.ts` (bunfig preload) points `TG_CONFIG_DIR` at a temp dir.

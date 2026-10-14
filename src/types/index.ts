@@ -63,6 +63,21 @@ export interface MediaAttachment {
   _message: Api.Message;    // GramJS reference for download
 }
 
+/** A tab in the sticker picker */
+export type StickerSource =
+  | { kind: "recent"; title: string }
+  | { kind: "faved"; title: string }
+  /** One of your installed packs */
+  | { kind: "pack"; title: string; id: string };
+
+export interface Sticker {
+  /** Telegram's id for the sticker's file */
+  id: string;
+  emoji?: string;
+  /** TGS/video stickers */
+  isAnimated: boolean;
+}
+
 // Result of a clipboard-image send attempt, surfaced to the composer so it can
 // show a transient status ("✓ Image sent" / "No image in clipboard").
 export interface ImageSendResult {
@@ -143,6 +158,11 @@ export interface TelegramService {
   getMessages(chatId: string, limit?: number, offsetId?: number): Promise<Message[]>;
   sendMessage(chatId: string, text: string, replyToMsgId?: number, replyToSenderName?: string): Promise<Message>;
   sendImage(chatId: string, filePath: string): Promise<Message>;
+  /** Recent, favorites, then your packs in Telegram's order */
+  getStickerSources(): Promise<StickerSource[]>;
+  getStickers(source: StickerSource): Promise<Sticker[]>;
+  /** One that getStickers returned */
+  sendSticker(chatId: string, sticker: Sticker, replyToMsgId?: number): Promise<Message>;
   editMessage(chatId: string, messageId: number, newText: string): Promise<Message>;
   markAsRead(chatId: string, maxMessageId?: number): Promise<boolean>;
   sendReaction(chatId: string, messageId: number, emoji: string): Promise<boolean>;

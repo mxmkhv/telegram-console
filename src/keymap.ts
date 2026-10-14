@@ -10,7 +10,7 @@ export interface KeyBinding {
   hint?: string;
 }
 
-export type KeymapSection = "global" | "header" | "chatList" | "messages" | "input" | "reactions" | "media";
+export type KeymapSection = "global" | "header" | "chatList" | "messages" | "input" | "reactions" | "stickers" | "media";
 
 export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding[] }> = {
   // Bar hints are listed in priority order: narrow terminals drop them from the end
@@ -72,6 +72,7 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
       { keys: ["↑↓"], action: "Move between lines" },
       { keys: ["^X"], action: "Cancel reply or edit", hint: "cancel" },
       { keys: ["^V"], action: "Send the image on the clipboard", hint: "image" },
+      { keys: ["^S"], action: "Send a sticker", hint: "sticker" },
       { keys: ["^A", "^E"], action: "Jump to start / end" },
       { keys: ["Esc", "Tab"], action: "Leave the input; draft is kept", hint: "leave" },
     ],
@@ -82,6 +83,17 @@ export const KEYMAP: Record<KeymapSection, { title: string; bindings: KeyBinding
       { keys: ["←→"], action: "Choose (arrows in the full grid)" },
       { keys: ["Enter"], action: "React; on [...] open the full grid" },
       { keys: ["Esc"], action: "Cancel" },
+    ],
+  },
+  stickers: {
+    title: "Stickers",
+    bindings: [
+      { keys: ["Tab"], action: "Next pack" },
+      { keys: ["Shift+Tab"], action: "Previous pack" },
+      { keys: ["Arrows"], action: "Choose" },
+      { keys: ["Enter"], action: "Send" },
+      { keys: ["^R"], action: "Retry loading" },
+      { keys: ["Esc"], action: "Close" },
     ],
   },
   media: {

@@ -5,6 +5,7 @@ import { EditedMessage, type EditedMessageEvent } from "telegram/events/EditedMe
 import { DeletedMessage, type DeletedMessageEvent } from "telegram/events/DeletedMessage";
 import { UpdateConnectionState } from "telegram/network";
 import { createConnectionWatchdog, readConnectionReport } from "./connectionWatchdog";
+import { createStickerStore } from "./telegramStickers";
 import { extractMedia, extractReactions, previewFrame, toMessage, type GramJSSender } from "./telegramMessage";
 import { createListeners } from "../utils/listeners";
 import { needsPreviewFrame } from "../utils/media";
@@ -284,6 +285,8 @@ export function createTelegramService(options: TelegramServiceOptions): Telegram
         media: extractMedia(result),
       };
     },
+
+    ...createStickerStore(client),
 
     async editMessage(chatId: string, messageId: number, newText: string) {
       await client.invoke(

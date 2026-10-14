@@ -1,4 +1,4 @@
-import type { TelegramService, ConnectionState, Chat, Message, MediaAttachment, ReportedReaction } from "../types";
+import type { TelegramService, ConnectionState, Chat, Message, MediaAttachment, ReportedReaction, Sticker, StickerSource } from "../types";
 import { createConnectionWatchdog } from "./connectionWatchdog";
 import { createListeners } from "../utils/listeners";
 import { MOCK_STICKER_WEBP } from "./mockSticker";
@@ -121,6 +121,35 @@ const MOCK_MESSAGES: Record<string, Message[]> = {
   ],
 };
 
+// Favorites left empty, like most accounts have them
+const MOCK_STICKER_SOURCES: StickerSource[] = [
+  { kind: "recent", title: "Recent" },
+  { kind: "faved", title: "Favorites" },
+  { kind: "pack", id: "smileys", title: "Smileys" },
+  { kind: "pack", id: "animals", title: "Animals" },
+  { kind: "pack", id: "hands", title: "Hand Signs" },
+  { kind: "pack", id: "food", title: "Food & Drink" },
+  { kind: "pack", id: "space", title: "Space Cats" },
+];
+
+// Every mock sticker downloads as the one mock sticker image
+const mockStickers = (prefix: string, emojis: string) =>
+  Array.from(emojis.matchAll(/\p{Extended_Pictographic}\uFE0F?/gu), ([emoji], i): Sticker => ({
+    id: `${prefix}-${i}`,
+    emoji,
+    isAnimated: false,
+  }));
+
+const MOCK_STICKERS: Record<string, Sticker[]> = {
+  recent: mockStickers("recent", "😊👍🔥😂🐱"),
+  faved: [],
+  smileys: mockStickers("smileys", "😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗😚😙😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏"),
+  animals: mockStickers("animals", "🐶🐱🐭🐹🐰🦊🐻🐼🐨🐯🦁🐮🐷🐸🐵🐔"),
+  hands: mockStickers("hands", "👍👎👊✊🤛🤜👏🙌👐🤲🤝🙏"),
+  food: mockStickers("food", "🍏🍎🍐🍊🍋🍌🍉🍇🍓🫐🍈🍒🍑🥭🍍🥥"),
+  space: mockStickers("space", "🚀🛸🌙⭐🪐☄️🌍🌌"),
+};
+
 // What happens elsewhere, every 5 seconds: new messages for the flash and
 // notifications, and edits, reactions and deletes by others
 type DripEvent =
@@ -152,9 +181,11 @@ export interface MockFailures {
   getMessages?: boolean;
   send?: boolean;
   edit?: boolean;
+  /** Loading the sticker picker's packs */
+  stickers?: boolean;
 }
 
-// TG_MOCK_FAIL=send,edit,connect,getMessages,drop makes those calls fail in --mock mode
+// TG_MOCK_FAIL=send,edit,connect,getMessages,drop,stickers makes those calls fail in --mock mode
 export function mockFailuresFromEnv(value = process.env.TG_MOCK_FAIL): MockFailures {
   const names = new Set(value?.split(",").map((name) => name.trim()));
   return {
@@ -163,6 +194,7 @@ export function mockFailuresFromEnv(value = process.env.TG_MOCK_FAIL): MockFailu
     getMessages: names.has("getMessages"),
     send: names.has("send"),
     edit: names.has("edit"),
+    stickers: names.has("stickers"),
   };
 }
 
@@ -430,6 +462,36 @@ export function createMockTelegramService(options?: {
         messages[chatId] = [];
       }
       messages[chatId]!.push(message);
+      return message;
+    },
+
+    async getStickerSources() {
+      await new Promise((r) => setTimeout(r, 50));
+      failIf(failures.stickers, "Mock: request timed out");
+      return MOCK_STICKER_SOURCES;
+    },
+
+    async getStickers(source: StickerSource) {
+      await new Promise((r) => setTimeout(r, 50));
+      failIf(failures.stickers, "Mock: request timed out");
+      return MOCK_STICKERS[source.kind === "pack" ? source.id : source.kind] ?? [];
+    },
+
+    async sendSticker(chatId: string, sticker: Sticker, replyToMsgId?: number) {
+      await new Promise((r) => setTimeout(r, 50));
+      failIf(failures.send, "Mock: CHAT_SEND_STICKERS_FORBIDDEN");
+      failIf(offline, "Mock: not connected");
+      const message: Message = {
+        id: Date.now(),
+        senderId: "me",
+        senderName: "You",
+        text: "",
+        timestamp: new Date(),
+        isOutgoing: true,
+        media: mockMedia({ type: "sticker", emoji: sticker.emoji, isAnimated: sticker.isAnimated, fileId: MOCK_STICKER_FILE_ID, mimeType: "image/webp" }),
+        replyToMsgId,
+      };
+      (messages[chatId] ??= []).push(message);
       return message;
     },
 
